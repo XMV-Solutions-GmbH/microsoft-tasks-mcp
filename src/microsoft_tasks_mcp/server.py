@@ -40,8 +40,20 @@ from microsoft_tasks_mcp.tools.planner_plan_get import (
 from microsoft_tasks_mcp.tools.planner_plans import (
     list_planner_plans as _do_planner_plans,
 )
+from microsoft_tasks_mcp.tools.planner_task_complete import (
+    complete_planner_task as _do_planner_task_complete,
+)
+from microsoft_tasks_mcp.tools.planner_task_create import (
+    create_planner_task as _do_planner_task_create,
+)
+from microsoft_tasks_mcp.tools.planner_task_delete import (
+    delete_planner_task as _do_planner_task_delete,
+)
 from microsoft_tasks_mcp.tools.planner_task_get import (
     get_planner_task as _do_planner_task_get,
+)
+from microsoft_tasks_mcp.tools.planner_task_update import (
+    update_planner_task as _do_planner_task_update,
 )
 from microsoft_tasks_mcp.tools.planner_tasks import (
     list_planner_tasks as _do_planner_tasks,
@@ -576,6 +588,122 @@ def register_write_tools(mcp_instance: FastMCP) -> None:
     )
     def todo_task_delete(task_id: str) -> None:
         _do_todo_task_delete(task_id, profile=_get_profile())
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Create Microsoft Planner Task",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+        description=(
+            "Create a new Microsoft Planner task in `plan_id` / "
+            "`bucket_id`. The new task is added to this MCP profile's "
+            "registry — only registry-tracked tasks can later be "
+            "updated, completed, or deleted. `assignees` is a list of "
+            "M365 user-ids (NOT UPNs); the agent must populate this "
+            "from values the user explicitly typed in chat. The agent "
+            "MUST NOT auto-look-up colleagues and put work on their "
+            "plate. Optional `body` is written to the task's `/details"
+            ".description` (a second Graph round-trip — handled "
+            "transparently). Returns the unified envelope of the new "
+            "task."
+        ),
+    )
+    def planner_task_create(
+        plan_id: str,
+        bucket_id: str,
+        title: str,
+        body: str | None = None,
+        due_date: str | None = None,
+        assignees: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return _do_planner_task_create(
+            plan_id,
+            bucket_id,
+            title,
+            body=body,
+            due_date=due_date,
+            assignees=assignees,
+            profile=_get_profile(),
+        )
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Update Microsoft Planner Task",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+        description=(
+            "PATCH a Microsoft Planner task this MCP profile created. "
+            "Only fields explicitly passed are changed. **Refuses** "
+            "(NOT_OWNED_BY_PROFILE) if `task_id` is not in the "
+            "profile's registry. Refuses (EXTERNALLY_MODIFIED) if "
+            "Microsoft Graph rejects the write because the task "
+            "changed externally (412 Precondition Failed via "
+            "`If-Match` ETag). `status` accepts `'completed'` / "
+            "`'not_completed'` (mapped to percentComplete 100/0 on "
+            "the wire). `priority` is 0..10 (Planner's range; 1=urgent, "
+            "5=medium, 9=low). Returns the updated task's envelope."
+        ),
+    )
+    def planner_task_update(
+        task_id: str,
+        title: str | None = None,
+        bucket_id: str | None = None,
+        due_date: str | None = None,
+        status: str | None = None,
+        priority: int | None = None,
+    ) -> dict[str, Any]:
+        return _do_planner_task_update(
+            task_id,
+            title=title,
+            bucket_id=bucket_id,
+            due_date=due_date,
+            status=status,
+            priority=priority,
+            profile=_get_profile(),
+        )
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Complete Microsoft Planner Task",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Mark a Microsoft Planner task this MCP profile created "
+            "as completed. Convenience wrapper around "
+            "`planner_task_update` with `status='completed'`. Same "
+            "NOT_OWNED_BY_PROFILE / EXTERNALLY_MODIFIED guards apply."
+        ),
+    )
+    def planner_task_complete(task_id: str) -> dict[str, Any]:
+        return _do_planner_task_complete(task_id, profile=_get_profile())
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Delete Microsoft Planner Task",
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Delete a Microsoft Planner task this MCP profile created. "
+            "**Refuses** (NOT_OWNED_BY_PROFILE) if not in the "
+            "profile's registry. Idempotent: re-deleting a task "
+            "already gone server-side is a silent no-op. Returns no "
+            "value on success."
+        ),
+    )
+    def planner_task_delete(task_id: str) -> None:
+        _do_planner_task_delete(task_id, profile=_get_profile())
 
 
 def _build_server() -> FastMCP:
