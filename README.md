@@ -216,6 +216,7 @@ Every tool returns a **unified task envelope** with `id`, `title`, `status`, `du
 |---|---|
 | `todo_task_create`, `todo_task_update`, `todo_task_complete`, `todo_task_delete` | Writes on To Do tasks — **only** tasks this profile's registry created. |
 | `planner_task_create`, `planner_task_update`, `planner_task_complete`, `planner_task_delete` | Writes on Planner tasks — same registry guarantee. |
+| `planner_task_add_reference`, `planner_task_remove_reference` | Attach / detach an HTTP/HTTPS URL reference (OneNote, SharePoint, etc.) on a profile-owned Planner task. Same registry guarantee. |
 | `tasks_status` | Inspect this profile's "I created this" registry. |
 
 To enable, set `TASKS_ALLOW_WRITES=true` in the MCP client config (e.g. via `env` block in `.mcp.json`):

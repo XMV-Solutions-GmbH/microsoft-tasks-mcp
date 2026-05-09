@@ -40,6 +40,9 @@ from microsoft_tasks_mcp.tools.planner_plan_get import (
 from microsoft_tasks_mcp.tools.planner_plans import (
     list_planner_plans as _do_planner_plans,
 )
+from microsoft_tasks_mcp.tools.planner_task_add_reference import (
+    add_planner_task_reference as _do_planner_task_add_reference,
+)
 from microsoft_tasks_mcp.tools.planner_task_complete import (
     complete_planner_task as _do_planner_task_complete,
 )
@@ -51,6 +54,9 @@ from microsoft_tasks_mcp.tools.planner_task_delete import (
 )
 from microsoft_tasks_mcp.tools.planner_task_get import (
     get_planner_task as _do_planner_task_get,
+)
+from microsoft_tasks_mcp.tools.planner_task_remove_reference import (
+    remove_planner_task_reference as _do_planner_task_remove_reference,
 )
 from microsoft_tasks_mcp.tools.planner_task_update import (
     update_planner_task as _do_planner_task_update,
@@ -722,6 +728,69 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
     )
     def planner_task_delete(task_id: str) -> None:
         _do_planner_task_delete(task_id, profile=_get_profile())
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Add Reference to Microsoft Planner Task",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Attach an HTTP / HTTPS URL reference to a profile-owned "
+            "Microsoft Planner task. Use this when the user wants the "
+            "agent to bookmark a OneNote page, SharePoint document, or "
+            "any other URL on the task. **Refuses** "
+            "(NOT_OWNED_BY_PROFILE) if `task_id` is not in the "
+            "profile's registry. Surfaces EXTERNALLY_MODIFIED on a "
+            "details-ETag mismatch (412). Optional `alias` is the "
+            "human label Planner shows in the UI; optional `type_hint` "
+            "is a Microsoft-classified type string (`'Word'`, "
+            "`'Excel'`, `'PowerPoint'`, `'PDF'`, `'Other'` are common "
+            "values; Graph accepts any string). Returns the unified "
+            "task envelope plus the full `references` list."
+        ),
+    )
+    def planner_task_add_reference(
+        task_id: str,
+        url: str,
+        alias: str | None = None,
+        type_hint: str | None = None,
+    ) -> dict[str, Any]:
+        return _do_planner_task_add_reference(
+            task_id,
+            url,
+            alias=alias,
+            type_hint=type_hint,
+            profile=_get_profile(),
+        )
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Remove Reference from Microsoft Planner Task",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Detach a URL reference from a profile-owned Microsoft "
+            "Planner task. Idempotent: removing a URL that isn't "
+            "currently a reference is a silent no-op (returns the "
+            "unchanged envelope). **Refuses** (NOT_OWNED_BY_PROFILE) if "
+            "`task_id` is not in the profile's registry. Surfaces "
+            "EXTERNALLY_MODIFIED on a details-ETag mismatch. Returns "
+            "the unified task envelope plus the refreshed "
+            "`references` list."
+        ),
+    )
+    def planner_task_remove_reference(task_id: str, url: str) -> dict[str, Any]:
+        return _do_planner_task_remove_reference(
+            task_id,
+            url,
+            profile=_get_profile(),
+        )
 
 
 def _build_server() -> FastMCP:
