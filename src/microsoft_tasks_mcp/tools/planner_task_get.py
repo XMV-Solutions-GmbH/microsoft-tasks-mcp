@@ -16,7 +16,11 @@ from typing import Any
 import httpx
 
 from microsoft_tasks_mcp.auth import get_token
-from microsoft_tasks_mcp.tools._common import GRAPH_BASE, auth_headers
+from microsoft_tasks_mcp.tools._common import (
+    GRAPH_BASE,
+    auth_headers,
+    tenant_id_from_token,
+)
 from microsoft_tasks_mcp.tools._shape import planner_envelope
 
 
@@ -44,6 +48,7 @@ def get_planner_task(
 
     task_id_s = task_id.strip()
     token = get_token(profile)
+    tenant_id = tenant_id_from_token(token)
     client = http if http is not None else httpx.Client(timeout=30.0)
     try:
         response = client.get(
@@ -54,7 +59,7 @@ def get_planner_task(
         payload = response.json()
         if not isinstance(payload, dict):
             raise ValueError("planner_task_get: Graph returned a non-object response")
-        envelope = planner_envelope(payload)
+        envelope = planner_envelope(payload, tenant_id=tenant_id)
 
         if include_details:
             details_response = client.get(

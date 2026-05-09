@@ -21,7 +21,11 @@ from typing import Any
 import httpx
 
 from microsoft_tasks_mcp.auth import get_token
-from microsoft_tasks_mcp.tools._common import GRAPH_BASE, auth_headers
+from microsoft_tasks_mcp.tools._common import (
+    GRAPH_BASE,
+    auth_headers,
+    tenant_id_from_token,
+)
 from microsoft_tasks_mcp.tools._shape import planner_envelope, todo_envelope
 
 _VALID_SOURCES = frozenset({"all", "todo", "planner"})
@@ -51,6 +55,7 @@ def search(
 
     needle = query.strip().lower()
     token = get_token(profile)
+    tenant_id = tenant_id_from_token(token)
     client = http if http is not None else httpx.Client(timeout=30.0)
     try:
         out: list[dict[str, Any]] = []
@@ -61,6 +66,7 @@ def search(
                 _search_planner(
                     client=client,
                     token=token,
+                    tenant_id=tenant_id,
                     needle=needle,
                     limit=limit - len(out),
                 )
@@ -125,6 +131,7 @@ def _search_planner(
     *,
     client: httpx.Client,
     token: str,
+    tenant_id: str | None,
     needle: str,
     limit: int,
 ) -> list[dict[str, Any]]:
@@ -152,7 +159,7 @@ def _search_planner(
             break
         if not isinstance(task, dict):
             continue
-        envelope = planner_envelope(task)
+        envelope = planner_envelope(task, tenant_id=tenant_id)
         if _matches(envelope, needle):
             out.append(envelope)
     return out

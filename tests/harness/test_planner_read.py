@@ -105,6 +105,32 @@ def test_planner_task_get_round_trips_first_visible_task() -> None:
 
 
 @pytest.mark.skipif(not _harness_token_present(), reason=_SKIP_REASON)
+def test_planner_task_web_url_constructed_and_reachable() -> None:
+    """Issue #27 acceptance criterion: the deep-link the envelope
+    builds from the JWT `tid` claim must actually resolve when followed."""
+    import httpx
+
+    plans = list_planner_plans(profile=HARNESS_PROFILE, limit=1)
+    if not plans:
+        pytest.skip("harness account sees no Planner plans")
+    tasks = list_planner_tasks(plans[0]["id"], profile=HARNESS_PROFILE, limit=1)
+    if not tasks:
+        pytest.skip("first visible plan has no tasks")
+    web_url = tasks[0]["web_url"]
+    assert isinstance(web_url, str), (
+        f"expected web_url to be populated for Planner tasks; got {web_url!r}"
+    )
+    assert web_url.startswith("https://tasks.office.com/")
+    # Microsoft serves a SPA from tasks.office.com that auth-redirects
+    # unauthenticated visitors; we don't follow auth, just confirm the
+    # host doesn't return a hard error.
+    response = httpx.head(web_url, follow_redirects=False, timeout=15.0)
+    assert response.status_code < 500, (
+        f"unexpected server error when following web_url: {response.status_code}"
+    )
+
+
+@pytest.mark.skipif(not _harness_token_present(), reason=_SKIP_REASON)
 def test_planner_task_get_with_details() -> None:
     """include_details=True must additionally fetch /details and fold
     in description / checklist / references / preview_type."""

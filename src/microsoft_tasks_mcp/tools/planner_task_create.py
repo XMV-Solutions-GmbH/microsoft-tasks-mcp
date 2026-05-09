@@ -15,7 +15,11 @@ import httpx
 
 from microsoft_tasks_mcp.auth import get_token
 from microsoft_tasks_mcp.task_registry import TaskEntry, TaskRegistry, now
-from microsoft_tasks_mcp.tools._common import GRAPH_BASE, auth_headers
+from microsoft_tasks_mcp.tools._common import (
+    GRAPH_BASE,
+    auth_headers,
+    tenant_id_from_token,
+)
 from microsoft_tasks_mcp.tools._shape import planner_envelope
 
 
@@ -71,6 +75,7 @@ def create_planner_task(
         }
 
     token = get_token(profile)
+    tenant_id = tenant_id_from_token(token)
     client = http if http is not None else httpx.Client(timeout=30.0)
     try:
         response = client.post(
@@ -82,7 +87,7 @@ def create_planner_task(
         raw = response.json()
         if not isinstance(raw, dict):
             raise ValueError("planner_task_create: Graph returned a non-object response")
-        envelope = planner_envelope(raw)
+        envelope = planner_envelope(raw, tenant_id=tenant_id)
         graph_id = envelope.get("id")
 
         # Optional body → write to /details

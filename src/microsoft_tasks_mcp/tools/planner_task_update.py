@@ -15,7 +15,11 @@ import httpx
 
 from microsoft_tasks_mcp.auth import get_token
 from microsoft_tasks_mcp.task_registry import TaskRegistry
-from microsoft_tasks_mcp.tools._common import GRAPH_BASE, auth_headers
+from microsoft_tasks_mcp.tools._common import (
+    GRAPH_BASE,
+    auth_headers,
+    tenant_id_from_token,
+)
 from microsoft_tasks_mcp.tools._shape import planner_envelope
 from microsoft_tasks_mcp.tools._writes_common import (
     ExternallyModifiedError,
@@ -82,8 +86,10 @@ def update_planner_task(
             "(title / bucket_id / due_date / status / priority)",
         )
 
+    token = get_token(profile)
+    tenant_id = tenant_id_from_token(token)
     headers: dict[str, str] = {
-        **auth_headers(get_token(profile)),
+        **auth_headers(token),
         "Content-Type": "application/json",
         "Prefer": "return=representation",
     }
@@ -105,7 +111,7 @@ def update_planner_task(
         if response.status_code == 204 or not response.content:
             get_response = client.get(
                 f"{GRAPH_BASE}/planner/tasks/{task_id_s}",
-                headers=auth_headers(get_token(profile)),
+                headers=auth_headers(token),
             )
             get_response.raise_for_status()
             raw = get_response.json()
@@ -113,7 +119,7 @@ def update_planner_task(
             raw = response.json()
         if not isinstance(raw, dict):
             raise ValueError("planner_task_update: Graph returned a non-object response")
-        envelope = planner_envelope(raw)
+        envelope = planner_envelope(raw, tenant_id=tenant_id)
     finally:
         if http is None:
             client.close()
