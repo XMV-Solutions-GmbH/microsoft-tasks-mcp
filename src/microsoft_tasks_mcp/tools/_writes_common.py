@@ -11,7 +11,87 @@ call. If the task isn't in this profile's registry, the tool raises
 
 from __future__ import annotations
 
+from typing import Any
+
 from microsoft_tasks_mcp.task_registry import TaskEntry, TaskRegistry
+
+# Microsoft Graph `recurrencePattern` enum values — shared across
+# Planner (and, in a follow-up issue, To Do). Validation is deliberately
+# thin: we catch obviously-wrong enum values before the HTTP call so the
+# agent gets a clear local error, but we don't replicate the full
+# "type X requires fields Y and Z" matrix because Graph is the
+# authoritative source for that and its error message is more useful
+# than ours would be after drift.
+_VALID_PATTERN_TYPES = frozenset(
+    {"daily", "weekly", "absoluteMonthly", "relativeMonthly", "absoluteYearly", "relativeYearly"},
+)
+_VALID_DAYS_OF_WEEK = frozenset(
+    {"sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"},
+)
+_VALID_INDEX = frozenset({"first", "second", "third", "fourth", "last"})
+
+
+def validate_planner_recurrence(recurrence: Any) -> None:
+    """Validate a Planner `recurrence` argument shape before HTTP.
+
+    `recurrence` must be a dict with a `schedule` containing a `pattern`
+    that has `type` (in `_VALID_PATTERN_TYPES`) and `interval` (int).
+    `daysOfWeek`, `firstDayOfWeek`, and `index` enums are checked when
+    present; everything else is passed through to Graph for validation.
+
+    Permitting `recurrence={"schedule": None}` is intentional — that's
+    how a series is discontinued per Graph semantics. The top-level
+    `recurrence` itself cannot be set to None on a task that already
+    has recurrence (Graph rejects that); we don't pre-empt that error
+    locally, we let Graph surface it.
+
+    Raises `ValueError` on shape errors. Returns None on success.
+    """
+    if not isinstance(recurrence, dict):
+        raise ValueError("recurrence must be a dict")
+    if "schedule" not in recurrence:
+        raise ValueError("recurrence must have a 'schedule' key")
+    schedule = recurrence["schedule"]
+    if schedule is None:
+        return  # cancellation form
+    if not isinstance(schedule, dict):
+        raise ValueError("recurrence.schedule must be a dict or null")
+    pattern = schedule.get("pattern")
+    if not isinstance(pattern, dict):
+        raise ValueError("recurrence.schedule.pattern must be a dict")
+    pat_type = pattern.get("type")
+    if pat_type not in _VALID_PATTERN_TYPES:
+        raise ValueError(
+            f"recurrence.schedule.pattern.type must be one of {sorted(_VALID_PATTERN_TYPES)}, "
+            f"got {pat_type!r}",
+        )
+    interval = pattern.get("interval")
+    if not isinstance(interval, int) or interval < 1:
+        raise ValueError(
+            f"recurrence.schedule.pattern.interval must be a positive int, got {interval!r}",
+        )
+    days = pattern.get("daysOfWeek")
+    if days is not None:
+        if not isinstance(days, list) or not all(isinstance(d, str) for d in days):
+            raise ValueError("recurrence.schedule.pattern.daysOfWeek must be a list of strings")
+        bad = [d for d in days if d not in _VALID_DAYS_OF_WEEK]
+        if bad:
+            raise ValueError(
+                f"recurrence.schedule.pattern.daysOfWeek contains invalid day(s) {bad}; "
+                f"valid: {sorted(_VALID_DAYS_OF_WEEK)}",
+            )
+    fdow = pattern.get("firstDayOfWeek")
+    if fdow is not None and fdow not in _VALID_DAYS_OF_WEEK:
+        raise ValueError(
+            f"recurrence.schedule.pattern.firstDayOfWeek must be one of "
+            f"{sorted(_VALID_DAYS_OF_WEEK)}, got {fdow!r}",
+        )
+    index = pattern.get("index")
+    if index is not None and index not in _VALID_INDEX:
+        raise ValueError(
+            f"recurrence.schedule.pattern.index must be one of {sorted(_VALID_INDEX)}, "
+            f"got {index!r}",
+        )
 
 
 class NotOwnedByProfileError(RuntimeError):

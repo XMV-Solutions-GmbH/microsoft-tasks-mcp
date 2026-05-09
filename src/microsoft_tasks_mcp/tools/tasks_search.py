@@ -25,6 +25,7 @@ from microsoft_tasks_mcp.auth.flow import planner_disabled
 from microsoft_tasks_mcp.tools._common import (
     GRAPH_BASE,
     auth_headers,
+    graph_planner_base,
     tenant_id_from_token,
 )
 from microsoft_tasks_mcp.tools._shape import planner_envelope, todo_envelope
@@ -143,7 +144,7 @@ def _search_planner(
     """
     try:
         response = client.get(
-            f"{GRAPH_BASE}/me/planner/tasks",
+            f"{graph_planner_base()}/me/planner/tasks",
             headers=auth_headers(token),
             params={"$top": 200},
         )

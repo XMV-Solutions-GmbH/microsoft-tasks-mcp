@@ -121,7 +121,9 @@ def planner_envelope(raw: dict[str, Any], *, tenant_id: str | None = None) -> di
 
     Extras: `plan_id`, `bucket_id`, `priority` (int), `percent_complete`
     (int 0..100), `body_preview` (None unless `details` were expanded),
-    `created_date_time`, `last_modified_date_time`, `applied_categories`.
+    `created_date_time`, `last_modified_date_time`, `applied_categories`,
+    `recurrence` (None unless the task is recurring AND the read came
+    from /beta — Graph's recurrence APIs are /beta-only).
     """
     assignments = raw.get("assignments")
     assignees: list[str] = []
@@ -147,6 +149,36 @@ def planner_envelope(raw: dict[str, Any], *, tenant_id: str | None = None) -> di
         "applied_categories": _extract_applied_categories(raw.get("appliedCategories")),
         "created_date_time": raw.get("createdDateTime"),
         "last_modified_date_time": _last_modified_planner(raw),
+        "recurrence": _extract_planner_recurrence(raw.get("recurrence")),
+    }
+
+
+def _extract_planner_recurrence(raw: Any) -> dict[str, Any] | None:
+    """Surface the Planner recurrence shape on read, or None.
+
+    Graph returns the full `plannerTaskRecurrence` shape on /beta. We
+    pass through the writable + observable parts (schedule with its
+    pattern/start dates, plus the read-only series-tracking fields)
+    and skip the `@odata.type` stamps that callers never need.
+    """
+    if not isinstance(raw, dict):
+        return None
+    schedule = raw.get("schedule")
+    schedule_out: dict[str, Any] | None = None
+    if isinstance(schedule, dict):
+        sched_pattern = schedule.get("pattern")
+        schedule_out = {
+            "pattern": sched_pattern if isinstance(sched_pattern, dict) else None,
+            "patternStartDateTime": schedule.get("patternStartDateTime"),
+            "nextOccurrenceDateTime": schedule.get("nextOccurrenceDateTime"),
+        }
+    return {
+        "schedule": schedule_out,
+        "seriesId": raw.get("seriesId"),
+        "occurrenceId": raw.get("occurrenceId"),
+        "previousInSeriesTaskId": raw.get("previousInSeriesTaskId"),
+        "nextInSeriesTaskId": raw.get("nextInSeriesTaskId"),
+        "recurrenceStartDateTime": raw.get("recurrenceStartDateTime"),
     }
 
 

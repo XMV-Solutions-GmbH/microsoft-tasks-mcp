@@ -16,11 +16,17 @@ from __future__ import annotations
 import base64
 import json
 
+import pytest
+
 from microsoft_tasks_mcp import __version__
 from microsoft_tasks_mcp.tools._common import (
     GRAPH_BASE,
+    GRAPH_BETA_BASE,
+    PLANNER_BETA_ENV,
     USER_AGENT,
     auth_headers,
+    graph_planner_base,
+    planner_beta_enabled,
     planner_web_url,
     tenant_id_from_token,
 )
@@ -135,3 +141,38 @@ def test_planner_web_url_canonical_format() -> None:
         url
         == "https://tasks.office.com/11111111-2222-3333-4444-555555555555/Home/Task/task-abc-123"
     )
+
+
+# ---------------------------------------------------------------------
+# planner_beta_enabled / graph_planner_base — opt-in beta switch
+# ---------------------------------------------------------------------
+
+
+def test_graph_beta_base_url_constant() -> None:
+    assert GRAPH_BETA_BASE == "https://graph.microsoft.com/beta"
+
+
+def test_planner_beta_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(PLANNER_BETA_ENV, raising=False)
+    assert planner_beta_enabled() is False
+    assert graph_planner_base() == GRAPH_BASE
+
+
+@pytest.mark.parametrize("truthy", ["1", "true", "TRUE", "Yes", "on"])
+def test_planner_beta_recognises_truthy_values(
+    monkeypatch: pytest.MonkeyPatch,
+    truthy: str,
+) -> None:
+    monkeypatch.setenv(PLANNER_BETA_ENV, truthy)
+    assert planner_beta_enabled() is True
+    assert graph_planner_base() == GRAPH_BETA_BASE
+
+
+@pytest.mark.parametrize("falsy", ["0", "false", "no", "off", "", "anything"])
+def test_planner_beta_rejects_non_truthy_values(
+    monkeypatch: pytest.MonkeyPatch,
+    falsy: str,
+) -> None:
+    monkeypatch.setenv(PLANNER_BETA_ENV, falsy)
+    assert planner_beta_enabled() is False
+    assert graph_planner_base() == GRAPH_BASE

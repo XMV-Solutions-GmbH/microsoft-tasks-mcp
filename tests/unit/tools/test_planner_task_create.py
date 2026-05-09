@@ -150,3 +150,98 @@ def test_propagates_403(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     respx.post(POST_URL).respond(403, json={"error": "no"})
     with pytest.raises(httpx.HTTPStatusError):
         create_planner_task("P1", "B1", "X", registry=TaskRegistry("default", base_dir=tmp_path))
+
+
+# ---------------------------------------------------------------------
+# Recurrence (v0.4) — opt-in via MS_TASKS_PLANNER_BETA
+# ---------------------------------------------------------------------
+
+
+_BETA_POST_URL = "https://graph.microsoft.com/beta/planner/tasks"
+
+
+def _good_weekly_recurrence() -> dict[str, object]:
+    return {
+        "schedule": {
+            "patternStartDateTime": "2026-05-09T08:00:00Z",
+            "pattern": {
+                "type": "weekly",
+                "interval": 1,
+                "daysOfWeek": ["monday"],
+                "firstDayOfWeek": "sunday",
+            },
+        },
+    }
+
+
+def test_recurrence_without_beta_flag_raises_before_http(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("MS_TASKS_PLANNER_BETA", raising=False)
+    _patch_get_token(monkeypatch)
+    with pytest.raises(ValueError, match="MS_TASKS_PLANNER_BETA=true"):
+        create_planner_task(
+            "P1",
+            "B1",
+            "X",
+            recurrence=_good_weekly_recurrence(),
+            registry=TaskRegistry("default", base_dir=tmp_path),
+        )
+
+
+@respx.mock
+def test_recurrence_with_beta_flag_routes_through_beta_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MS_TASKS_PLANNER_BETA", "true")
+    _patch_get_token(monkeypatch)
+    route = respx.post(_BETA_POST_URL).respond(
+        201,
+        json={
+            "id": "T1",
+            "title": "X",
+            "planId": "P1",
+            "bucketId": "B1",
+            "percentComplete": 0,
+            "assignments": {},
+            "@odata.etag": 'W/"e"',
+            "recurrence": {
+                "seriesId": "S1",
+                "occurrenceId": 1,
+                "schedule": _good_weekly_recurrence()["schedule"],
+            },
+        },
+    )
+    out = create_planner_task(
+        "P1",
+        "B1",
+        "X",
+        recurrence=_good_weekly_recurrence(),
+        registry=TaskRegistry("default", base_dir=tmp_path),
+    )
+    assert route.call_count == 1
+    sent = route.calls.last.request.read().decode()
+    assert '"recurrence"' in sent
+    assert '"weekly"' in sent
+    assert out["recurrence"] is not None
+    assert out["recurrence"]["seriesId"] == "S1"
+
+
+def test_recurrence_with_invalid_pattern_type_raises_before_http(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MS_TASKS_PLANNER_BETA", "true")
+    _patch_get_token(monkeypatch)
+    bad = _good_weekly_recurrence()
+    bad["schedule"]["pattern"]["type"] = "hourly"  # type: ignore[index]
+    with pytest.raises(ValueError, match=r"pattern\.type must be one of"):
+        create_planner_task(
+            "P1",
+            "B1",
+            "X",
+            recurrence=bad,
+            registry=TaskRegistry("default", base_dir=tmp_path),
+        )

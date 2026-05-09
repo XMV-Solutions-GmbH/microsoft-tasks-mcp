@@ -16,11 +16,14 @@ import httpx
 from microsoft_tasks_mcp.auth import get_token
 from microsoft_tasks_mcp.task_registry import TaskEntry, TaskRegistry, now
 from microsoft_tasks_mcp.tools._common import (
-    GRAPH_BASE,
+    PLANNER_BETA_ENV,
     auth_headers,
+    graph_planner_base,
+    planner_beta_enabled,
     tenant_id_from_token,
 )
 from microsoft_tasks_mcp.tools._shape import planner_envelope
+from microsoft_tasks_mcp.tools._writes_common import validate_planner_recurrence
 
 
 def create_planner_task(
@@ -31,6 +34,7 @@ def create_planner_task(
     body: str | None = None,
     due_date: str | None = None,
     assignees: list[str] | None = None,
+    recurrence: dict[str, Any] | None = None,
     profile: str = "default",
     http: httpx.Client | None = None,
     registry: TaskRegistry | None = None,
@@ -40,6 +44,12 @@ def create_planner_task(
     `assignees` is a list of M365 user-ids (NOT UPNs). The agent is
     only meant to populate this from values the user typed in chat —
     no auto-lookup of colleagues.
+
+    `recurrence` is the optional `plannerTaskRecurrence` payload —
+    must contain at least `{"schedule": {"pattern": {...}, "patternStartDateTime": ...}}`.
+    Recurrence requires `MS_TASKS_PLANNER_BETA=true` because Microsoft
+    Graph's recurrence APIs are /beta-only as of this release; passing
+    `recurrence` without that flag raises before any HTTP call.
 
     Returns the unified envelope of the new task. Adds the new task's
     `graph_id` to this profile's registry. The `body` argument creates
@@ -53,6 +63,14 @@ def create_planner_task(
         raise ValueError("planner_task_create requires a non-empty bucket_id")
     if not title or not title.strip():
         raise ValueError("planner_task_create requires a non-empty title")
+
+    if recurrence is not None:
+        if not planner_beta_enabled():
+            raise ValueError(
+                "planner_task_create: `recurrence` requires "
+                f"{PLANNER_BETA_ENV}=true (Microsoft Graph recurrence APIs are /beta-only)",
+            )
+        validate_planner_recurrence(recurrence)
 
     plan_id_s = plan_id.strip()
     bucket_id_s = bucket_id.strip()
@@ -73,13 +91,15 @@ def create_planner_task(
             for assignee_id in assignees
             if isinstance(assignee_id, str) and assignee_id.strip()
         }
+    if recurrence is not None:
+        payload["recurrence"] = recurrence
 
     token = get_token(profile)
     tenant_id = tenant_id_from_token(token)
     client = http if http is not None else httpx.Client(timeout=30.0)
     try:
         response = client.post(
-            f"{GRAPH_BASE}/planner/tasks",
+            f"{graph_planner_base()}/planner/tasks",
             headers={**auth_headers(token), "Content-Type": "application/json"},
             json=payload,
         )
@@ -94,7 +114,7 @@ def create_planner_task(
         if body is not None and isinstance(graph_id, str):
             # First fetch the freshly-created details to get its ETag.
             details_response = client.get(
-                f"{GRAPH_BASE}/planner/tasks/{graph_id}/details",
+                f"{graph_planner_base()}/planner/tasks/{graph_id}/details",
                 headers=auth_headers(token),
             )
             details_response.raise_for_status()
@@ -109,7 +129,7 @@ def create_planner_task(
                 details_headers["If-Match"] = details_etag
 
             patch_response = client.patch(
-                f"{GRAPH_BASE}/planner/tasks/{graph_id}/details",
+                f"{graph_planner_base()}/planner/tasks/{graph_id}/details",
                 headers=details_headers,
                 json={"description": body},
             )

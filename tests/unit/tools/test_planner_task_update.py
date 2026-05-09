@@ -185,3 +185,139 @@ def test_propagates_403(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     respx.patch(URL).respond(403, json={"error": "no"})
     with pytest.raises(httpx.HTTPStatusError):
         update_planner_task("T1", title="X", registry=reg)
+
+
+# ---------------------------------------------------------------------
+# Recurrence (v0.4)
+# ---------------------------------------------------------------------
+
+
+_BETA_URL = "https://graph.microsoft.com/beta/planner/tasks/T1"
+
+
+def test_recurrence_without_beta_flag_raises_before_http(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("MS_TASKS_PLANNER_BETA", raising=False)
+    _patch_get_token(monkeypatch)
+    reg = _seed_registry(tmp_path)
+    with pytest.raises(ValueError, match="MS_TASKS_PLANNER_BETA=true"):
+        update_planner_task(
+            "T1",
+            recurrence={"schedule": {"pattern": {"type": "daily", "interval": 1}}},
+            registry=reg,
+        )
+
+
+@respx.mock
+def test_recurrence_set_routes_through_beta(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MS_TASKS_PLANNER_BETA", "true")
+    _patch_get_token(monkeypatch)
+    reg = _seed_registry(tmp_path)
+    route = respx.patch(_BETA_URL).respond(
+        json={
+            "id": "T1",
+            "title": "X",
+            "planId": "P1",
+            "percentComplete": 0,
+            "assignments": {},
+            "@odata.etag": 'W/"v2"',
+            "recurrence": {
+                "seriesId": "S1",
+                "occurrenceId": 2,
+                "schedule": {
+                    "pattern": {"type": "daily", "interval": 1},
+                    "patternStartDateTime": "2026-05-09T08:00:00Z",
+                },
+            },
+        }
+    )
+    out = update_planner_task(
+        "T1",
+        recurrence={
+            "schedule": {
+                "pattern": {"type": "daily", "interval": 1},
+                "patternStartDateTime": "2026-05-09T08:00:00Z",
+            },
+        },
+        registry=reg,
+    )
+    assert route.call_count == 1
+    sent = route.calls.last.request.read().decode()
+    assert '"recurrence"' in sent and '"daily"' in sent
+    assert out["recurrence"]["seriesId"] == "S1"
+
+
+@respx.mock
+def test_recurrence_clear_via_schedule_null_forwards_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Per Graph: stop a series by setting recurrence.schedule = null."""
+    monkeypatch.setenv("MS_TASKS_PLANNER_BETA", "true")
+    _patch_get_token(monkeypatch)
+    reg = _seed_registry(tmp_path)
+    route = respx.patch(_BETA_URL).respond(
+        json={
+            "id": "T1",
+            "title": "X",
+            "planId": "P1",
+            "percentComplete": 0,
+            "assignments": {},
+            "@odata.etag": 'W/"v2"',
+            "recurrence": {"seriesId": "S1", "schedule": None, "occurrenceId": 1},
+        }
+    )
+    update_planner_task(
+        "T1",
+        recurrence={"schedule": None},
+        registry=reg,
+    )
+    sent = route.calls.last.request.read().decode()
+    assert '"recurrence"' in sent and '"schedule":null' in sent
+
+
+def test_recurrence_with_invalid_pattern_type_raises(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MS_TASKS_PLANNER_BETA", "true")
+    _patch_get_token(monkeypatch)
+    reg = _seed_registry(tmp_path)
+    with pytest.raises(ValueError, match=r"pattern\.type must be one of"):
+        update_planner_task(
+            "T1",
+            recurrence={"schedule": {"pattern": {"type": "hourly", "interval": 1}}},
+            registry=reg,
+        )
+
+
+def test_omitted_recurrence_argument_does_not_send_recurrence_field(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The default `_UNSET` sentinel means recurrence stays out of the payload entirely.
+
+    Important: passing `recurrence=None` is reserved for callers who want to *try*
+    clearing top-level recurrence; that's a different intent than not touching it.
+    """
+    _patch_get_token(monkeypatch)
+    reg = _seed_registry(tmp_path)
+    with respx.mock:
+        respx.patch(URL).respond(
+            json={
+                "id": "T1",
+                "title": "Y",
+                "planId": "P1",
+                "percentComplete": 0,
+                "assignments": {},
+                "@odata.etag": 'W/"v2"',
+            }
+        )
+        update_planner_task("T1", title="Y", registry=reg)
+        sent = respx.calls.last.request.read().decode()
+    assert "recurrence" not in sent

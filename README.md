@@ -267,6 +267,46 @@ With this flag set:
 
 Both the writes opt-in (`TASKS_ALLOW_WRITES=true`) and the no-Planner opt-out are independent: you can have writes-with-Planner, writes-without-Planner, reads-with-Planner, or reads-without-Planner.
 
+## Recurring Planner tasks — opt in to `/beta` with `MS_TASKS_PLANNER_BETA=true`
+
+Microsoft Graph's Planner recurrence APIs are `/beta`-only. To create a recurring task — or to see the `recurrence` field on read — opt in to the beta endpoint:
+
+```json
+{
+  "mcpServers": {
+    "microsoft-tasks": {
+      "command": "uvx",
+      "args": ["mcp-server-microsoft-tasks"],
+      "env": { "TASKS_ALLOW_WRITES": "true", "MS_TASKS_PLANNER_BETA": "true" }
+    }
+  }
+}
+```
+
+With the flag on, every Planner tool routes through `/beta/planner/...`. `planner_task_create` and `planner_task_update` accept an optional `recurrence` argument; the unified envelope surfaces `recurrence` on read with the schedule + series-tracking metadata Graph populates.
+
+Example agent call (creating a weekly status-update task):
+
+```json
+{
+  "tool": "planner_task_create",
+  "arguments": {
+    "plan_id": "...", "bucket_id": "...", "title": "Weekly status",
+    "recurrence": {
+      "schedule": {
+        "patternStartDateTime": "2026-05-11T08:00:00Z",
+        "pattern": {
+          "type": "weekly", "interval": 1,
+          "daysOfWeek": ["monday"], "firstDayOfWeek": "sunday"
+        }
+      }
+    }
+  }
+}
+```
+
+To stop a series: `planner_task_update(task_id, recurrence={"schedule": null})`. (Graph rejects setting top-level `recurrence` to `null` on a task that already has it.) Without the flag, passing a `recurrence` argument raises before the HTTP call with a clear pointer to `MS_TASKS_PLANNER_BETA`.
+
 ## Token storage
 
 `mcp-server-microsoft-tasks` uses `mcp-microsoft-graph-auth` (sister library) to manage tokens. Default backend on macOS / Windows / Linux-desktop is the OS keyring; on headless Linux the fallback is a 0600 plain file at `~/.cache/mcp-server-microsoft-tasks/<profile>/token.json`. For CI / encrypted-file mode, set `MS_TASKS_TOKEN_PASSPHRASE` and `MS_TASKS_TOKEN_STORE=encrypted-file`. Override the auto-pick with `MS_TASKS_TOKEN_STORE=keyring|file|encrypted-file`.

@@ -152,3 +152,52 @@ def test_complete_marks_task_completed(
         assert completed["status"] == "completed"
     finally:
         delete_planner_task(task_id, profile=HARNESS_PROFILE, registry=_registry)
+
+
+@pytest.mark.skipif(not _harness_token_present(), reason=_SKIP_REASON)
+def test_recurrence_create_round_trip(
+    _registry: TaskRegistry,
+    _sandbox: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Create a recurring Planner task via /beta, read it back, assert
+    Graph populated `seriesId` + `occurrenceId`, then delete.
+
+    Recurrence requires `MS_TASKS_PLANNER_BETA=true`. We set it here
+    and let the harness exercise the real beta endpoint.
+    """
+    monkeypatch.setenv("MS_TASKS_PLANNER_BETA", "true")
+    plan_id, bucket_id = _sandbox
+    title = f"harness recurrence {uuid.uuid4()}"
+    recurrence = {
+        "schedule": {
+            "patternStartDateTime": "2026-05-09T08:00:00Z",
+            "pattern": {
+                "type": "weekly",
+                "interval": 1,
+                "daysOfWeek": ["monday"],
+                "firstDayOfWeek": "sunday",
+            },
+        },
+    }
+    created = create_planner_task(
+        plan_id,
+        bucket_id,
+        title,
+        recurrence=recurrence,
+        profile=HARNESS_PROFILE,
+        registry=_registry,
+    )
+    task_id = str(created["id"])
+    try:
+        assert created["title"] == title
+        rec = created.get("recurrence")
+        assert rec is not None, "expected Graph to populate `recurrence` on create"
+        # Graph populates seriesId + occurrenceId (=1 for the first occurrence)
+        assert isinstance(rec.get("seriesId"), str) and rec["seriesId"]
+        assert rec.get("occurrenceId") == 1
+        # Pattern we sent should round-trip
+        assert rec["schedule"]["pattern"]["type"] == "weekly"
+        assert rec["schedule"]["pattern"]["interval"] == 1
+    finally:
+        delete_planner_task(task_id, profile=HARNESS_PROFILE, registry=_registry)

@@ -18,12 +18,22 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from typing import Any
 
 from microsoft_tasks_mcp import __version__
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+GRAPH_BETA_BASE = "https://graph.microsoft.com/beta"
 USER_AGENT = f"mcp-server-microsoft-tasks/{__version__}"
+
+# Env flag that switches all Planner tools (read + write) from
+# /v1.0/planner to /beta/planner. Required to surface `recurrence` on
+# read or accept it on write — Microsoft Graph's recurrence APIs for
+# Planner are /beta-only as of this release. Default off; the
+# /v1.0 surface is unchanged for everyone who doesn't opt in.
+PLANNER_BETA_ENV = "MS_TASKS_PLANNER_BETA"
+_PLANNER_BETA_TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 
 def auth_headers(token: str) -> dict[str, str]:
@@ -68,6 +78,32 @@ def tenant_id_from_token(token: str) -> str | None:
         return None
     tid = payload.get("tid")
     return tid if isinstance(tid, str) and tid else None
+
+
+def planner_beta_enabled() -> bool:
+    """True iff `MS_TASKS_PLANNER_BETA` is set to a recognised truthy value.
+
+    When True, every Planner tool routes through `/beta/planner/...`
+    instead of the default `/v1.0/planner/...`. Required for any
+    recurrence-related operation; recurrence is /beta-only in Graph.
+    """
+    return os.environ.get(PLANNER_BETA_ENV, "").strip().lower() in _PLANNER_BETA_TRUTHY
+
+
+def graph_planner_base() -> str:
+    """Return the Microsoft Graph base URL to use for Planner-flavoured calls.
+
+    `/beta` when `MS_TASKS_PLANNER_BETA=true`, else `/v1.0`. Callers
+    compose the rest of the path themselves — Planner endpoints come
+    in three shapes (`/planner/...`, `/me/planner/...`,
+    `/groups/{id}/planner/...`) so a single string-suffix helper can't
+    cover all of them cleanly.
+
+    Returning a base URL (rather than the full URL) keeps the call
+    sites self-documenting: `f"{graph_planner_base()}/planner/tasks/{id}"`
+    is just as readable as the old GRAPH_BASE form.
+    """
+    return GRAPH_BETA_BASE if planner_beta_enabled() else GRAPH_BASE
 
 
 def planner_web_url(tenant_id: str, task_id: str) -> str:

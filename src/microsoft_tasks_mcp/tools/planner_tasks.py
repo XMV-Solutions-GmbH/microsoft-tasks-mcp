@@ -21,8 +21,8 @@ import httpx
 
 from microsoft_tasks_mcp.auth import get_token
 from microsoft_tasks_mcp.tools._common import (
-    GRAPH_BASE,
     auth_headers,
+    graph_planner_base,
     tenant_id_from_token,
 )
 from microsoft_tasks_mcp.tools._shape import planner_envelope
@@ -58,7 +58,7 @@ def list_planner_tasks(
     client = http if http is not None else httpx.Client(timeout=30.0)
     try:
         response = client.get(
-            f"{GRAPH_BASE}/planner/plans/{plan_id.strip()}/tasks",
+            f"{graph_planner_base()}/planner/plans/{plan_id.strip()}/tasks",
             headers=auth_headers(token),
         )
         response.raise_for_status()

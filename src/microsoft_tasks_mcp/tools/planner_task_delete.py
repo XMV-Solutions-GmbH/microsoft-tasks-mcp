@@ -13,7 +13,7 @@ import httpx
 
 from microsoft_tasks_mcp.auth import get_token
 from microsoft_tasks_mcp.task_registry import TaskRegistry
-from microsoft_tasks_mcp.tools._common import GRAPH_BASE, auth_headers
+from microsoft_tasks_mcp.tools._common import auth_headers, graph_planner_base
 from microsoft_tasks_mcp.tools._writes_common import require_owned_by_profile
 
 
@@ -48,7 +48,7 @@ def delete_planner_task(
     client = http if http is not None else httpx.Client(timeout=30.0)
     try:
         response = client.delete(
-            f"{GRAPH_BASE}/planner/tasks/{task_id_s}",
+            f"{graph_planner_base()}/planner/tasks/{task_id_s}",
             headers=headers,
         )
         if response.status_code == 404:
