@@ -2,6 +2,7 @@
 
 # mcp-server-microsoft-tasks
 
+[![PyPI version](https://img.shields.io/pypi/v/mcp-server-microsoft-tasks?color=0E7EE0)](https://pypi.org/project/mcp-server-microsoft-tasks/)
 [![Licence](https://img.shields.io/badge/licence-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/blob/main/LICENSE)
 [![CI](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/actions/workflows/ci.yml)
 [![Status: alpha](https://img.shields.io/badge/status-alpha-yellow.svg)](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues)
@@ -159,15 +160,36 @@ Every action above is a **read** — no Planner/To-Do state was modified. The se
 
 Every tool returns a **unified task envelope** with `id`, `title`, `status`, `due_date`, `assignees`, `web_url`, `source`, `etag`, plus source-specific extras (`list_id` / `body_preview` / `categories` / `importance` / `reminder_date` for To Do; `plan_id` / `bucket_id` / `priority` / `percent_complete` / `applied_categories` for Planner). Agents can route follow-up calls correctly off the `source` tag without learning two response shapes.
 
-## v0.2 (planned, opt-in via `TASKS_ALLOW_WRITES=true`)
+## v0.2 — write tools, opt-in via `TASKS_ALLOW_WRITES=true`
 
 | Tool | What it does |
 |---|---|
-| `todo_task_create`, `todo_task_update`, `todo_task_complete`, `todo_task_delete` | Writes on To Do tasks — *only* tasks this profile's registry created. |
+| `todo_task_create`, `todo_task_update`, `todo_task_complete`, `todo_task_delete` | Writes on To Do tasks — **only** tasks this profile's registry created. |
 | `planner_task_create`, `planner_task_update`, `planner_task_complete`, `planner_task_delete` | Writes on Planner tasks — same registry guarantee. |
 | `tasks_status` | Inspect this profile's "I created this" registry. |
 
-The default install does NOT request `Tasks.ReadWrite`. Setting `TASKS_ALLOW_WRITES=true` adds the scope at sign-in time AND registers the write tools at MCP-server-start time. The per-profile registry on disk records every task this server created; write tools refuse — at the tool layer, before any Microsoft Graph call — to act on tasks not in the registry. ETag-based optimistic concurrency adds a second guard against silently clobbering external edits.
+To enable, set `TASKS_ALLOW_WRITES=true` in the MCP client config (e.g. via `env` block in `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "microsoft-tasks": {
+      "command": "uvx",
+      "args": ["mcp-server-microsoft-tasks"],
+      "env": { "TASKS_ALLOW_WRITES": "true" }
+    }
+  }
+}
+```
+
+The default install does NOT request `Tasks.ReadWrite`. Setting `TASKS_ALLOW_WRITES=true` adds the scope at sign-in time AND registers the write tools at MCP-server-start time.
+
+### The two write-time safety guarantees
+
+1. **Per-profile registry on disk** records every task this server created (`~/.cache/mcp-server-microsoft-tasks/<profile>/tasks.json`, mode 0o600). Write tools refuse — at the tool layer, *before* any Microsoft Graph call — to act on tasks not in the registry. The error is `NOT_OWNED_BY_PROFILE`. Hand-created tasks in Microsoft Planner / To Do are never modified by the agent; tasks created by other agents (different MCP profile, different process, different machine) are likewise untouchable.
+2. **ETag-based optimistic concurrency** via `If-Match`. The registry stores the last ETag this server saw; every PATCH / DELETE attaches it; Microsoft Graph returns 412 Precondition Failed if the task changed externally between the agent's read and the write. The MCP surfaces this as `EXTERNALLY_MODIFIED` so the agent re-fetches and decides.
+
+No bulk operations, no auto-assignment to other users, no plan/list creation: each write tool acts on exactly one task per call, and `assignees` on `planner_task_create` is filled only from values the human typed in chat. See [`docs/app-concept.md`](docs/app-concept.md) § Conflict / safety semantics.
 
 ## Token storage
 
