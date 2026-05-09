@@ -10,6 +10,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Tracked in [GitHub Issues](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues).
 
+## [v0.2.0] — 2026-05-09
+
+Write tools opt-in via `TASKS_ALLOW_WRITES=true`. The load-bearing safety guarantee — the agent never modifies tasks it did not create itself — is enforced by a per-profile on-disk registry and ETag-based optimistic concurrency.
+
+### Added
+
+- **Per-profile task registry** (`src/microsoft_tasks_mcp/task_registry.py`) — JSON-on-disk at `~/.cache/mcp-server-microsoft-tasks/<profile>/tasks.json`, mode 0o600. Atomic temp-file + rename writes, process-wide threading lock for concurrent mutations. Persists across server restarts. Records `source` / `graph_id` / `list_or_plan_id` / `title` / `etag` / `created_at` per entry.
+- **`tasks_status`** MCP tool — read-only registry inspection. Returns every task this profile created with last-known title, source, ETag, creation timestamp.
+- **To Do write tools** (4):
+  - `todo_task_create(list_id, title, body?, due_date?, importance?)` — POST + add to registry.
+  - `todo_task_update(task_id, title?, body?, due_date?, status?, importance?)` — PATCH with `If-Match`. Refuses `NOT_OWNED_BY_PROFILE` if not in registry. Refuses `EXTERNALLY_MODIFIED` on 412.
+  - `todo_task_complete(task_id)` — convenience wrapper over update with `status="completed"`.
+  - `todo_task_delete(task_id)` — idempotent (404 = success, registry cleaned).
+- **Planner write tools** (4):
+  - `planner_task_create(plan_id, bucket_id, title, body?, due_date?, assignees?)` — POST + add to registry. `body` writes to `/details.description` in a follow-up PATCH (transparent two-Graph-call sequence). `assignees` is M365 user-ids (not UPNs).
+  - `planner_task_update(task_id, title?, bucket_id?, due_date?, status?, priority?)` — PATCH with `If-Match`. `status` maps `completed`/`not_completed` to `percentComplete` 100/0. Falls back to a GET when Graph returns 204 instead of representation.
+  - `planner_task_complete(task_id)` — convenience wrapper.
+  - `planner_task_delete(task_id)` — idempotent with `If-Match`.
+- **Shared write-guard module** (`tools/_writes_common.py`): `require_owned_by_profile()` runs **before** any Microsoft Graph call. `NotOwnedByProfileError` and `ExternallyModifiedError` are the two structured failures the agent can act on.
+- **Harness write tests**: real Microsoft Graph create / update / complete / delete cycles for both surfaces, with try/finally cleanup so no orphan tasks linger on the live plan.
+- **Harness sandbox provisioned**: dedicated M365 group (`Microsoft Tasks MCP Harness`, mailNickname `microsoft-tasks-mcp-harness`) with one Planner plan `Harness` containing `Todo` and `Done` buckets and a seed task. Re-activates the previously-skipped Planner harness reads + lights up the new Planner write harness.
+
+### Changed
+
+- **Default install OAuth scopes are unchanged.** `Tasks.ReadWrite` is appended to the OAuth scope request only when `TASKS_ALLOW_WRITES=true`. The default consent prompt stays read-only.
+- **Server registration**: `register_write_tools` now actually registers nine tools (`tasks_status` + 4 todo + 4 planner) when `TASKS_ALLOW_WRITES` is truthy. Without the env flag, the server runs in read-only mode unchanged from v0.1.0.
+
+### Engineering
+
+- 298 unit + integration tests, 16 harness tests against the real Microsoft Graph against the harness account.
+- Branch protection enforced on `main` since v0.1.0; every v0.2 chunk shipped as its own PR with green CI.
+
 ## [v0.1.0] — 2026-05-09
 
 First public release. Read-only MVP across **Microsoft Planner + Microsoft To Do**, unified.
@@ -54,5 +86,6 @@ First public release. Read-only MVP across **Microsoft Planner + Microsoft To Do
 - `tasks_search` is client-side because neither Microsoft surface exposes server-side task search. Spike on the Microsoft Graph Search API (`/search/query`) is on the v0.2+ roadmap.
 - Harness account `d.koller@xmv.de` currently has no Planner plans visible. Planner harness tests skip defensively. Adding the harness account to a Planner-enabled M365 group would activate the round-trip assertions.
 
-[Unreleased]: https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/compare/v0.2.0...HEAD
+[v0.2.0]: https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/releases/tag/v0.2.0
 [v0.1.0]: https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/releases/tag/v0.1.0
