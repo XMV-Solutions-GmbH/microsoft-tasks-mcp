@@ -9,4 +9,7 @@ import microsoft_tasks_mcp
 
 
 def test_package_imports() -> None:
-    assert microsoft_tasks_mcp.__version__ == "0.0.0"
+    """Sanity: package imports + version follows the documented shape."""
+    assert microsoft_tasks_mcp.__version__
+    parts = microsoft_tasks_mcp.__version__.split(".")
+    assert len(parts) >= 3, microsoft_tasks_mcp.__version__
