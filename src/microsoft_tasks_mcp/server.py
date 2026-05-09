@@ -46,6 +46,10 @@ from microsoft_tasks_mcp.tools.planner_task_get import (
 from microsoft_tasks_mcp.tools.planner_tasks import (
     list_planner_tasks as _do_planner_tasks,
 )
+from microsoft_tasks_mcp.tools.tasks_assigned_to_me import (
+    assigned_to_me as _do_tasks_assigned_to_me,
+)
+from microsoft_tasks_mcp.tools.tasks_search import search as _do_tasks_search
 from microsoft_tasks_mcp.tools.todo_list_get import get_todo_list as _do_todo_list_get
 from microsoft_tasks_mcp.tools.todo_lists import list_todo_lists as _do_todo_lists
 from microsoft_tasks_mcp.tools.todo_task_get import get_todo_task as _do_todo_task_get
@@ -355,6 +359,65 @@ def register_read_tools(mcp_instance: FastMCP) -> None:
         return _do_planner_task_get(
             task_id,
             include_details=include_details,
+            profile=_get_profile(),
+        )
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="List Tasks Assigned to Me",
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Cross-source view: every Microsoft To Do task in the "
+            "user's lists plus every Microsoft Planner task assigned "
+            "to the user, merged into one list. Sorted by `due_date` "
+            "ascending (None last). `include_completed=False` "
+            "excludes completed tasks from both surfaces. Each entry "
+            "is a unified task envelope tagged with `source` "
+            "(`'todo'` or `'planner'`) so the agent can route "
+            "follow-up calls correctly. Read-only."
+        ),
+    )
+    def tasks_assigned_to_me(
+        include_completed: bool = False,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        return _do_tasks_assigned_to_me(
+            include_completed=include_completed,
+            limit=limit,
+            profile=_get_profile(),
+        )
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Search Microsoft Tasks",
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Case-insensitive substring search across the user's To "
+            "Do tasks and Planner tasks. Matches against `title` and "
+            "`body_preview`. `source` narrows to a single surface — "
+            "`'all'` (default), `'todo'`, or `'planner'`. Returns up "
+            "to `limit` matches in the unified envelope shape. "
+            "Read-only. Note: implementation is client-side because "
+            "neither surface exposes a server-side $search for tasks; "
+            "performance is fine at typical task volumes (hundreds, "
+            "not hundreds of thousands)."
+        ),
+    )
+    def tasks_search(
+        query: str,
+        source: str = "all",
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        return _do_tasks_search(
+            query,
+            source=source,
+            limit=limit,
             profile=_get_profile(),
         )
 
