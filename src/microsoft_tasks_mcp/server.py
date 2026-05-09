@@ -31,6 +31,21 @@ from mcp.types import ToolAnnotations
 from microsoft_tasks_mcp.auth.flow import writes_enabled
 from microsoft_tasks_mcp.tools.login_begin import login_begin as _do_login_begin
 from microsoft_tasks_mcp.tools.login_status import login_status as _do_login_status
+from microsoft_tasks_mcp.tools.planner_buckets import (
+    list_planner_buckets as _do_planner_buckets,
+)
+from microsoft_tasks_mcp.tools.planner_plan_get import (
+    get_planner_plan as _do_planner_plan_get,
+)
+from microsoft_tasks_mcp.tools.planner_plans import (
+    list_planner_plans as _do_planner_plans,
+)
+from microsoft_tasks_mcp.tools.planner_task_get import (
+    get_planner_task as _do_planner_task_get,
+)
+from microsoft_tasks_mcp.tools.planner_tasks import (
+    list_planner_tasks as _do_planner_tasks,
+)
 from microsoft_tasks_mcp.tools.todo_list_get import get_todo_list as _do_todo_list_get
 from microsoft_tasks_mcp.tools.todo_lists import list_todo_lists as _do_todo_lists
 from microsoft_tasks_mcp.tools.todo_task_get import get_todo_task as _do_todo_task_get
@@ -220,6 +235,128 @@ def register_read_tools(mcp_instance: FastMCP) -> None:
     )
     def todo_task_get(list_id: str, task_id: str) -> dict[str, Any]:
         return _do_todo_task_get(list_id, task_id, profile=_get_profile())
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="List Microsoft Planner Plans",
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "List Microsoft Planner plans the signed-in user can see. "
+            "Without `group_id`, enumerates the user's M365 groups via "
+            "`/me/memberOf` (requires Group.Read.All admin-consent — "
+            "already granted on the XMV-published OAuth app) and "
+            "aggregates plans across them. With `group_id`, lists "
+            "plans within that single group. Each plan has `id`, "
+            "`title`, `owner_group_id`, `created_date_time`, `etag`. "
+            "Read-only."
+        ),
+    )
+    def planner_plans(
+        group_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        return _do_planner_plans(
+            group_id=group_id,
+            limit=limit,
+            profile=_get_profile(),
+        )
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Get Microsoft Planner Plan",
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Fetch one Microsoft Planner plan by id. Same shape as an "
+            "entry returned by `planner_plans`. Read-only."
+        ),
+    )
+    def planner_plan_get(plan_id: str) -> dict[str, Any]:
+        return _do_planner_plan_get(plan_id, profile=_get_profile())
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="List Microsoft Planner Buckets",
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "List buckets (columns) within a Planner plan. Each bucket "
+            "has `id`, `name`, `plan_id`, `order_hint`, `etag`. The "
+            "`order_hint` follows Microsoft Graph's lexicographic "
+            "ordering scheme (read-only — buckets ship pre-ordered as "
+            "the user arranged them in Planner). Read-only."
+        ),
+    )
+    def planner_buckets(plan_id: str) -> list[dict[str, Any]]:
+        return _do_planner_buckets(plan_id, profile=_get_profile())
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="List Microsoft Planner Tasks",
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "List tasks within a Planner plan. Returns each task in "
+            "the unified envelope: `id`, `title`, `status` "
+            "(`completed`/`not_completed` — derived from "
+            "`percentComplete >= 100`), `due_date`, `assignees` (list "
+            "of M365 user-ids assigned to the task), `web_url` (None "
+            "until the tenant deep-link is wired in v0.2+), `source` "
+            "(`'planner'`), `etag`, `plan_id`, `bucket_id`, "
+            "`priority`, `percent_complete`, `applied_categories`, "
+            "`created_date_time`, `last_modified_date_time`. "
+            "Optionally narrow by `bucket_id` and `status_filter` "
+            "(`'all'`/`'completed'`/`'not_completed'`)."
+        ),
+    )
+    def planner_tasks(
+        plan_id: str,
+        bucket_id: str | None = None,
+        status_filter: str = "all",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        return _do_planner_tasks(
+            plan_id,
+            bucket_id=bucket_id,
+            status_filter=status_filter,
+            limit=limit,
+            profile=_get_profile(),
+        )
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Get Microsoft Planner Task",
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Fetch one Planner task by id. Returns the unified task "
+            "envelope (same shape as items in `planner_tasks`). "
+            "Pass `include_details=True` to additionally fetch the "
+            "task's `description`, `checklist`, `references`, and "
+            "`preview_type` (one extra Graph round-trip to "
+            "`/planner/tasks/{id}/details`). Read-only."
+        ),
+    )
+    def planner_task_get(
+        task_id: str,
+        include_details: bool = False,
+    ) -> dict[str, Any]:
+        return _do_planner_task_get(
+            task_id,
+            include_details=include_details,
+            profile=_get_profile(),
+        )
 
 
 def register_write_tools(mcp_instance: FastMCP) -> None:
