@@ -285,18 +285,24 @@ def register_read_tools(mcp_instance: FastMCP) -> None:
             "ascending (None last). `include_completed=False` "
             "excludes completed tasks from both surfaces. Each entry "
             "is a unified task envelope tagged with `source` "
-            "(`'todo'` or `'planner'`) so the agent can route "
-            "follow-up calls correctly. Read-only."
+            "(`'todo'` or `'planner'`) and `profile` so the agent can "
+            "route follow-up calls correctly. Optional `profiles=[...]` "
+            "fans out across multiple signed-in tenants and merges; "
+            "per-profile failures are best-effort skipped and listed "
+            "in `_skipped_profiles`. Returns `{'tasks': [...], "
+            "'_skipped_profiles': [...]}`. Read-only."
         ),
     )
     def tasks_assigned_to_me(
         include_completed: bool = False,
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+        profiles: list[str] | None = None,
+    ) -> dict[str, Any]:
         return _do_tasks_assigned_to_me(
             include_completed=include_completed,
             limit=limit,
             profile=_get_profile(),
+            profiles=profiles,
         )
 
     @mcp_instance.tool(

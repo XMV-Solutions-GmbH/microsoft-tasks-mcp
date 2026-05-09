@@ -17,10 +17,19 @@ across both To Do and Planner". We make two calls:
 Both halves are merged client-side. Sorted by due_date ascending
 (None last). Per-source cap is `limit // 2` so neither side starves
 the other on large lists.
+
+When `profiles=[...]` is supplied, the function fans out across each
+profile (one signed-in tenant per profile name), tags each envelope
+with its source `profile`, and merges. Per-profile failures are
+best-effort skipped — the response includes a `_skipped_profiles`
+key listing what didn't load and why. See
+`docs/proposals/2026-05-09-cross-tenant-unified-view.md` for the
+design rationale.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
@@ -35,33 +44,90 @@ from microsoft_tasks_mcp.tools._common import (
 )
 from microsoft_tasks_mcp.tools._shape import planner_envelope, todo_envelope
 
+_log = logging.getLogger(__name__)
+
 
 def assigned_to_me(
     *,
     include_completed: bool = False,
     limit: int = 100,
     profile: str = "default",
+    profiles: list[str] | None = None,
     http: httpx.Client | None = None,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """Return tasks currently assigned to the signed-in user across To
     Do + Planner.
 
     `include_completed=False` (default) excludes completed tasks from
     both surfaces. `limit` caps the merged result at that many entries
     overall, splitting the budget evenly across the two sources.
+
+    `profiles=[...]` enables cross-tenant fan-out — see module docstring.
+    When omitted, single-profile behaviour is preserved and `profile`
+    is used.
+
+    Returns a dict with two keys:
+
+    - `tasks`: list of unified envelopes, each tagged with `profile`.
+    - `_skipped_profiles`: list of `{profile, reason}` entries for any
+      profile whose fetch failed; empty when everything succeeded.
     """
     if limit <= 0:
         raise ValueError(f"limit must be positive, got {limit}")
 
-    per_source = max(1, limit // 2)
+    target_profiles = list(profiles) if profiles else [profile]
+    per_profile_limit = max(1, limit // max(1, len(target_profiles)))
 
+    client = http if http is not None else httpx.Client(timeout=30.0)
+    merged: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    try:
+        for prof in target_profiles:
+            try:
+                merged.extend(
+                    _fetch_one_profile(
+                        client=client,
+                        profile=prof,
+                        include_completed=include_completed,
+                        limit=per_profile_limit,
+                    )
+                )
+            except (httpx.HTTPError, ValueError, RuntimeError) as exc:
+                # Best-effort: a profile whose token expired, whose
+                # tenant returned 401/403, or whose Graph call timed
+                # out should not abort the whole call. Log + continue.
+                _log.warning("tasks_assigned_to_me skipping profile %r: %s", prof, exc)
+                skipped.append({"profile": prof, "reason": str(exc)})
+    finally:
+        if http is None:
+            client.close()
+
+    merged.sort(key=_sort_key)
+    return {"tasks": merged[:limit], "_skipped_profiles": skipped}
+
+
+def _fetch_one_profile(
+    *,
+    client: httpx.Client,
+    profile: str,
+    include_completed: bool,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Fetch the merged To Do + Planner result for a single profile,
+    stamping each envelope with its `profile` for cross-tenant disambiguation.
+
+    Per-source isolation: a Planner-half 4xx (e.g. 403 on a tenant
+    without `Group.Read.All`) returns an empty Planner half but does
+    NOT abort the To Do half. Conversely a To Do failure does not
+    skip Planner. Only an unrecoverable error at the profile level
+    (token fetch, etc.) bubbles up.
+    """
+    per_source = max(1, limit // 2)
     token = get_token(profile)
     tenant_id = tenant_id_from_token(token)
-    client = http if http is not None else httpx.Client(timeout=30.0)
-    try:
-        if planner_disabled():
-            planner_tasks: list[dict[str, Any]] = []
-        else:
+    planner_tasks: list[dict[str, Any]] = []
+    if not planner_disabled():
+        try:
             planner_tasks = _fetch_planner(
                 client=client,
                 token=token,
@@ -69,19 +135,24 @@ def assigned_to_me(
                 include_completed=include_completed,
                 limit=per_source,
             )
+        except httpx.HTTPStatusError:
+            # Common in tenants where the user lacks Group.Read.All —
+            # surface the To Do half rather than skipping the whole
+            # profile.
+            planner_tasks = []
+    try:
         todo_tasks = _fetch_todo(
             client=client,
             token=token,
             include_completed=include_completed,
             limit=per_source,
         )
-    finally:
-        if http is None:
-            client.close()
-
-    merged = todo_tasks + planner_tasks
-    merged.sort(key=_sort_key)
-    return merged[:limit]
+    except httpx.HTTPStatusError:
+        todo_tasks = []
+    out = todo_tasks + planner_tasks
+    for envelope in out:
+        envelope["profile"] = profile
+    return out
 
 
 def _fetch_planner(
