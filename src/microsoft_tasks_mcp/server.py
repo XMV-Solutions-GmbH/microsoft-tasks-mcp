@@ -28,7 +28,7 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
-from microsoft_tasks_mcp.auth.flow import writes_enabled
+from microsoft_tasks_mcp.auth.flow import planner_disabled, writes_enabled
 from microsoft_tasks_mcp.tools.login_begin import login_begin as _do_login_begin
 from microsoft_tasks_mcp.tools.login_status import login_status as _do_login_status
 from microsoft_tasks_mcp.tools.planner_buckets import (
@@ -267,6 +267,74 @@ def register_read_tools(mcp_instance: FastMCP) -> None:
 
     @mcp_instance.tool(
         annotations=ToolAnnotations(
+            title="List Tasks Assigned to Me",
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Cross-source view: every Microsoft To Do task in the "
+            "user's lists plus every Microsoft Planner task assigned "
+            "to the user, merged into one list. Sorted by `due_date` "
+            "ascending (None last). `include_completed=False` "
+            "excludes completed tasks from both surfaces. Each entry "
+            "is a unified task envelope tagged with `source` "
+            "(`'todo'` or `'planner'`) so the agent can route "
+            "follow-up calls correctly. Read-only."
+        ),
+    )
+    def tasks_assigned_to_me(
+        include_completed: bool = False,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        return _do_tasks_assigned_to_me(
+            include_completed=include_completed,
+            limit=limit,
+            profile=_get_profile(),
+        )
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Search Microsoft Tasks",
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Case-insensitive substring search across the user's To "
+            "Do tasks and Planner tasks. Matches against `title` and "
+            "`body_preview`. `source` narrows to a single surface — "
+            "`'all'` (default), `'todo'`, or `'planner'`. Returns up "
+            "to `limit` matches in the unified envelope shape. "
+            "Read-only. Note: implementation is client-side because "
+            "neither surface exposes a server-side $search for tasks; "
+            "performance is fine at typical task volumes (hundreds, "
+            "not hundreds of thousands)."
+        ),
+    )
+    def tasks_search(
+        query: str,
+        source: str = "all",
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        return _do_tasks_search(
+            query,
+            source=source,
+            limit=limit,
+            profile=_get_profile(),
+        )
+
+
+def register_planner_read_tools(mcp_instance: FastMCP) -> None:
+    """Register the Planner read tools.
+
+    Skipped at server-build time when `MS_TASKS_NO_PLANNER` is truthy
+    — non-admin tenants can run the server without the
+    `Group.Read.All` admin-consent that Planner requires.
+    """
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
             title="List Microsoft Planner Plans",
             readOnlyHint=True,
             idempotentHint=True,
@@ -338,12 +406,13 @@ def register_read_tools(mcp_instance: FastMCP) -> None:
             "the unified envelope: `id`, `title`, `status` "
             "(`completed`/`not_completed` — derived from "
             "`percentComplete >= 100`), `due_date`, `assignees` (list "
-            "of M365 user-ids assigned to the task), `web_url` (None "
-            "until the tenant deep-link is wired in v0.2+), `source` "
-            "(`'planner'`), `etag`, `plan_id`, `bucket_id`, "
-            "`priority`, `percent_complete`, `applied_categories`, "
-            "`created_date_time`, `last_modified_date_time`. "
-            "Optionally narrow by `bucket_id` and `status_filter` "
+            "of M365 user-ids assigned to the task), `web_url` "
+            "(deep-link to tasks.office.com built from the access "
+            "token's tid claim), `source` (`'planner'`), `etag`, "
+            "`plan_id`, `bucket_id`, `priority`, `percent_complete`, "
+            "`applied_categories`, `created_date_time`, "
+            "`last_modified_date_time`. Optionally narrow by "
+            "`bucket_id` and `status_filter` "
             "(`'all'`/`'completed'`/`'not_completed'`)."
         ),
     )
@@ -384,65 +453,6 @@ def register_read_tools(mcp_instance: FastMCP) -> None:
         return _do_planner_task_get(
             task_id,
             include_details=include_details,
-            profile=_get_profile(),
-        )
-
-    @mcp_instance.tool(
-        annotations=ToolAnnotations(
-            title="List Tasks Assigned to Me",
-            readOnlyHint=True,
-            idempotentHint=True,
-            openWorldHint=False,
-        ),
-        description=(
-            "Cross-source view: every Microsoft To Do task in the "
-            "user's lists plus every Microsoft Planner task assigned "
-            "to the user, merged into one list. Sorted by `due_date` "
-            "ascending (None last). `include_completed=False` "
-            "excludes completed tasks from both surfaces. Each entry "
-            "is a unified task envelope tagged with `source` "
-            "(`'todo'` or `'planner'`) so the agent can route "
-            "follow-up calls correctly. Read-only."
-        ),
-    )
-    def tasks_assigned_to_me(
-        include_completed: bool = False,
-        limit: int = 100,
-    ) -> list[dict[str, Any]]:
-        return _do_tasks_assigned_to_me(
-            include_completed=include_completed,
-            limit=limit,
-            profile=_get_profile(),
-        )
-
-    @mcp_instance.tool(
-        annotations=ToolAnnotations(
-            title="Search Microsoft Tasks",
-            readOnlyHint=True,
-            idempotentHint=True,
-            openWorldHint=False,
-        ),
-        description=(
-            "Case-insensitive substring search across the user's To "
-            "Do tasks and Planner tasks. Matches against `title` and "
-            "`body_preview`. `source` narrows to a single surface — "
-            "`'all'` (default), `'todo'`, or `'planner'`. Returns up "
-            "to `limit` matches in the unified envelope shape. "
-            "Read-only. Note: implementation is client-side because "
-            "neither surface exposes a server-side $search for tasks; "
-            "performance is fine at typical task volumes (hundreds, "
-            "not hundreds of thousands)."
-        ),
-    )
-    def tasks_search(
-        query: str,
-        source: str = "all",
-        limit: int = 50,
-    ) -> list[dict[str, Any]]:
-        return _do_tasks_search(
-            query,
-            source=source,
-            limit=limit,
             profile=_get_profile(),
         )
 
@@ -589,6 +599,14 @@ def register_write_tools(mcp_instance: FastMCP) -> None:
     def todo_task_delete(task_id: str) -> None:
         _do_todo_task_delete(task_id, profile=_get_profile())
 
+
+def register_planner_write_tools(mcp_instance: FastMCP) -> None:
+    """Register the Planner write tools.
+
+    Skipped at server-build time when `MS_TASKS_NO_PLANNER` is truthy
+    (same gate as the Planner read tools).
+    """
+
     @mcp_instance.tool(
         annotations=ToolAnnotations(
             title="Create Microsoft Planner Task",
@@ -708,13 +726,24 @@ def register_write_tools(mcp_instance: FastMCP) -> None:
 
 def _build_server() -> FastMCP:
     """Build and return a FastMCP server with the right tools registered."""
+    log = logging.getLogger("microsoft-tasks-mcp")
     server = FastMCP("mcp-server-microsoft-tasks")
     register_login_tools(server)
     register_read_tools(server)
+    if not planner_disabled():
+        register_planner_read_tools(server)
+    else:
+        log.info(
+            "MS_TASKS_NO_PLANNER set — Planner tools NOT registered, "
+            "Group.Read.All NOT requested at sign-in. To Do tools "
+            "remain available.",
+        )
     if writes_enabled():
         register_write_tools(server)
+        if not planner_disabled():
+            register_planner_write_tools(server)
     else:
-        logging.getLogger("microsoft-tasks-mcp").info(
+        log.info(
             "TASKS_ALLOW_WRITES not set — read-only mode "
             "(write tools not registered). "
             "Set TASKS_ALLOW_WRITES=true to enable writes (v0.2+).",

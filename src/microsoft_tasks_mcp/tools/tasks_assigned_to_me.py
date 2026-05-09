@@ -26,6 +26,7 @@ from typing import Any
 import httpx
 
 from microsoft_tasks_mcp.auth import get_token
+from microsoft_tasks_mcp.auth.flow import planner_disabled
 from microsoft_tasks_mcp.tools._common import (
     GRAPH_BASE,
     auth_headers,
@@ -57,13 +58,16 @@ def assigned_to_me(
     tenant_id = tenant_id_from_token(token)
     client = http if http is not None else httpx.Client(timeout=30.0)
     try:
-        planner_tasks = _fetch_planner(
-            client=client,
-            token=token,
-            tenant_id=tenant_id,
-            include_completed=include_completed,
-            limit=per_source,
-        )
+        if planner_disabled():
+            planner_tasks: list[dict[str, Any]] = []
+        else:
+            planner_tasks = _fetch_planner(
+                client=client,
+                token=token,
+                tenant_id=tenant_id,
+                include_completed=include_completed,
+                limit=per_source,
+            )
         todo_tasks = _fetch_todo(
             client=client,
             token=token,

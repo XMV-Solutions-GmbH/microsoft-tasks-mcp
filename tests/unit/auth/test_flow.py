@@ -96,6 +96,66 @@ def test_resolve_scopes_is_call_time_not_import_time(
     assert "Tasks.ReadWrite" in after
 
 
+# ---------------------------------------------------------------------
+# planner_disabled / MS_TASKS_NO_PLANNER
+# ---------------------------------------------------------------------
+
+
+def test_planner_disabled_default_is_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(flow.NO_PLANNER_ENV, raising=False)
+    assert flow.planner_disabled() is False
+
+
+@pytest.mark.parametrize("value", ["true", "1", "yes", "ON"])
+def test_planner_disabled_truthy_values(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv(flow.NO_PLANNER_ENV, value)
+    assert flow.planner_disabled() is True
+
+
+@pytest.mark.parametrize("value", ["", "false", "0", "no", "maybe"])
+def test_planner_disabled_falsy_or_unrecognised(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv(flow.NO_PLANNER_ENV, value)
+    assert flow.planner_disabled() is False
+
+
+def test_resolve_scopes_drops_group_read_when_planner_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(flow.NO_PLANNER_ENV, "true")
+    monkeypatch.delenv(flow.ALLOW_WRITES_ENV, raising=False)
+    scopes = flow.resolve_scopes()
+    assert "Group.Read.All" not in scopes
+    # Other read scopes still present
+    assert "Tasks.Read" in scopes
+    assert "User.Read" in scopes
+    assert "offline_access" in scopes
+
+
+def test_resolve_scopes_planner_disabled_with_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two flags compose independently: NO_PLANNER + ALLOW_WRITES =
+    no Group.Read.All, with Tasks.ReadWrite included."""
+    monkeypatch.setenv(flow.NO_PLANNER_ENV, "true")
+    monkeypatch.setenv(flow.ALLOW_WRITES_ENV, "true")
+    scopes = flow.resolve_scopes()
+    assert "Group.Read.All" not in scopes
+    assert "Tasks.ReadWrite" in scopes
+    assert "Tasks.Read" in scopes
+
+
+def test_resolve_scopes_default_includes_group_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default install (no env flags) requests Group.Read.All —
+    Planner is on by default."""
+    monkeypatch.delenv(flow.NO_PLANNER_ENV, raising=False)
+    monkeypatch.delenv(flow.ALLOW_WRITES_ENV, raising=False)
+    assert "Group.Read.All" in flow.resolve_scopes()
+
+
 def test_lib_re_exports_are_present() -> None:
     """The shim must re-export the shared library's exception types
     so callers don't need to know the lib's internals."""

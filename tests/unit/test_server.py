@@ -74,6 +74,72 @@ def test_tasks_status_only_with_writes_enabled(
     assert "tasks_status" in names_on
 
 
+# ---------------------------------------------------------------------
+# MS_TASKS_NO_PLANNER opt-out
+# ---------------------------------------------------------------------
+
+
+_PLANNER_READ_TOOLS = {
+    "planner_plans",
+    "planner_plan_get",
+    "planner_buckets",
+    "planner_tasks",
+    "planner_task_get",
+}
+_PLANNER_WRITE_TOOLS = {
+    "planner_task_create",
+    "planner_task_update",
+    "planner_task_complete",
+    "planner_task_delete",
+}
+_TODO_READ_TOOLS = {"todo_lists", "todo_list_get", "todo_tasks", "todo_task_get"}
+
+
+def test_planner_reads_registered_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MS_TASKS_NO_PLANNER", raising=False)
+    monkeypatch.delenv("TASKS_ALLOW_WRITES", raising=False)
+    names = _registered_tool_names(_build_fresh_server(monkeypatch)._build_server())
+    assert _PLANNER_READ_TOOLS.issubset(names)
+
+
+def test_planner_reads_skipped_when_no_planner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MS_TASKS_NO_PLANNER", "true")
+    monkeypatch.delenv("TASKS_ALLOW_WRITES", raising=False)
+    names = _registered_tool_names(_build_fresh_server(monkeypatch)._build_server())
+    assert names.isdisjoint(_PLANNER_READ_TOOLS)
+    # To Do reads still present
+    assert _TODO_READ_TOOLS.issubset(names)
+    # Cross-source tools still present (they skip the planner half internally)
+    assert "tasks_assigned_to_me" in names
+    assert "tasks_search" in names
+    # Login tools still present
+    assert "tasks_login_status" in names
+
+
+def test_planner_writes_skipped_when_no_planner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MS_TASKS_NO_PLANNER", "true")
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "true")
+    names = _registered_tool_names(_build_fresh_server(monkeypatch)._build_server())
+    assert names.isdisjoint(_PLANNER_WRITE_TOOLS)
+    # To Do writes still register
+    assert "todo_task_create" in names
+    assert "todo_task_update" in names
+    assert "tasks_status" in names
+
+
+def test_planner_writes_registered_with_writes_and_no_no_planner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MS_TASKS_NO_PLANNER", raising=False)
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "true")
+    names = _registered_tool_names(_build_fresh_server(monkeypatch)._build_server())
+    assert _PLANNER_WRITE_TOOLS.issubset(names)
+
+
 def test_get_profile_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TASKS_PROFILE", raising=False)
     from microsoft_tasks_mcp.server import _get_profile

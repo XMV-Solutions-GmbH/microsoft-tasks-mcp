@@ -191,6 +191,32 @@ The default install does NOT request `Tasks.ReadWrite`. Setting `TASKS_ALLOW_WRI
 
 No bulk operations, no auto-assignment to other users, no plan/list creation: each write tool acts on exactly one task per call, and `assignees` on `planner_task_create` is filled only from values the human typed in chat. See [`docs/app-concept.md`](docs/app-concept.md) § Conflict / safety semantics.
 
+## Non-admin tenants — opt out of Planner with `MS_TASKS_NO_PLANNER=true`
+
+Microsoft Planner requires the `Group.Read.All` Graph scope to enumerate the M365 groups that own plans. That scope is **admin-consent** in most tenants — a non-admin user signing in for the first time will hit a "your administrator must approve this app" prompt.
+
+If you only care about your personal Microsoft To Do tasks, opt out of Planner entirely:
+
+```json
+{
+  "mcpServers": {
+    "microsoft-tasks": {
+      "command": "uvx",
+      "args": ["mcp-server-microsoft-tasks"],
+      "env": { "MS_TASKS_NO_PLANNER": "true" }
+    }
+  }
+}
+```
+
+With this flag set:
+
+- The OAuth scope request drops `Group.Read.All`, so the consent screen no longer needs admin approval.
+- The MCP server skips registering all `planner_*` tools at start-up (so the agent never sees them).
+- `tasks_assigned_to_me` and `tasks_search` silently exclude the Planner half — they still work, just on the To Do side only.
+
+Both the writes opt-in (`TASKS_ALLOW_WRITES=true`) and the no-Planner opt-out are independent: you can have writes-with-Planner, writes-without-Planner, reads-with-Planner, or reads-without-Planner.
+
 ## Token storage
 
 `mcp-server-microsoft-tasks` uses `mcp-microsoft-graph-auth` (sister library) to manage tokens. Default backend on macOS / Windows / Linux-desktop is the OS keyring; on headless Linux the fallback is a 0600 plain file at `~/.cache/mcp-server-microsoft-tasks/<profile>/token.json`. For CI / encrypted-file mode, set `MS_TASKS_TOKEN_PASSPHRASE` and `MS_TASKS_TOKEN_STORE=encrypted-file`. Override the auto-pick with `MS_TASKS_TOKEN_STORE=keyring|file|encrypted-file`.
