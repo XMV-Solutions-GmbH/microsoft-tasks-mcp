@@ -637,8 +637,12 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
             "MUST NOT auto-look-up colleagues and put work on their "
             "plate. Optional `body` is written to the task's `/details"
             ".description` (a second Graph round-trip — handled "
-            "transparently). Returns the unified envelope of the new "
-            "task."
+            "transparently). Optional `recurrence` requires "
+            "`MS_TASKS_PLANNER_BETA=true` and takes a "
+            "`plannerTaskRecurrence` payload "
+            '(`{"schedule": {"pattern": ..., '
+            '"patternStartDateTime": ...}}`). Returns the unified '
+            "envelope of the new task."
         ),
     )
     def planner_task_create(
@@ -648,6 +652,7 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
         body: str | None = None,
         due_date: str | None = None,
         assignees: list[str] | None = None,
+        recurrence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return _do_planner_task_create(
             plan_id,
@@ -656,6 +661,7 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
             body=body,
             due_date=due_date,
             assignees=assignees,
+            recurrence=recurrence,
             profile=_get_profile(),
         )
 
@@ -677,7 +683,11 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
             "`If-Match` ETag). `status` accepts `'completed'` / "
             "`'not_completed'` (mapped to percentComplete 100/0 on "
             "the wire). `priority` is 0..10 (Planner's range; 1=urgent, "
-            "5=medium, 9=low). Returns the updated task's envelope."
+            "5=medium, 9=low). Optional `recurrence` requires "
+            "`MS_TASKS_PLANNER_BETA=true`. To cancel an existing "
+            'series, pass `recurrence={"schedule": null}` (Graph '
+            "rejects null on the top-level field). Returns the updated "
+            "task's envelope."
         ),
     )
     def planner_task_update(
@@ -687,7 +697,16 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
         due_date: str | None = None,
         status: str | None = None,
         priority: int | None = None,
+        recurrence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # Forward recurrence only when the agent explicitly passed
+        # something. The underlying function uses an _UNSET sentinel
+        # to distinguish "leave unchanged" from "set to null"; the
+        # MCP-callable signature can't carry the sentinel, so omitting
+        # the kwarg here preserves "leave unchanged" semantics.
+        extra: dict[str, Any] = {}
+        if recurrence is not None:
+            extra["recurrence"] = recurrence
         return _do_planner_task_update(
             task_id,
             title=title,
@@ -696,6 +715,7 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
             status=status,
             priority=priority,
             profile=_get_profile(),
+            **extra,
         )
 
     @mcp_instance.tool(
