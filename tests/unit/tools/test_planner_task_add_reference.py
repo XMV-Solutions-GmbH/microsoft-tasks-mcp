@@ -91,7 +91,7 @@ def test_add_reference_sends_patch_to_details(
     sent = json.loads(patch_route.calls.last.request.read())
     assert sent["references"] == {
         "https%3A//example%2Ecom/x": {
-            "@odata.type": "#microsoft.graph.externalReference",
+            "@odata.type": "#microsoft.graph.plannerExternalReference",
             "alias": "Doc",
             "type": "Word",
         },
@@ -218,4 +218,4 @@ def test_add_reference_omits_alias_and_type_when_not_given(
     ]
     assert "alias" not in sent_entry
     assert "type" not in sent_entry
-    assert sent_entry["@odata.type"] == "#microsoft.graph.externalReference"
+    assert sent_entry["@odata.type"] == "#microsoft.graph.plannerExternalReference"
