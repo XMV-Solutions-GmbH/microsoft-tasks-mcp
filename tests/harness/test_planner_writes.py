@@ -23,9 +23,13 @@ from microsoft_tasks_mcp.auth.store import DEFAULT_CACHE_DIR
 from microsoft_tasks_mcp.task_registry import TaskRegistry
 from microsoft_tasks_mcp.tools.planner_buckets import list_planner_buckets
 from microsoft_tasks_mcp.tools.planner_plans import list_planner_plans
+from microsoft_tasks_mcp.tools.planner_task_add_reference import add_planner_task_reference
 from microsoft_tasks_mcp.tools.planner_task_complete import complete_planner_task
 from microsoft_tasks_mcp.tools.planner_task_create import create_planner_task
 from microsoft_tasks_mcp.tools.planner_task_delete import delete_planner_task
+from microsoft_tasks_mcp.tools.planner_task_remove_reference import (
+    remove_planner_task_reference,
+)
 from microsoft_tasks_mcp.tools.planner_task_update import update_planner_task
 
 HARNESS_PROFILE = "harness"
@@ -199,5 +203,50 @@ def test_recurrence_create_round_trip(
         # Pattern we sent should round-trip
         assert rec["schedule"]["pattern"]["type"] == "weekly"
         assert rec["schedule"]["pattern"]["interval"] == 1
+    finally:
+        delete_planner_task(task_id, profile=HARNESS_PROFILE, registry=_registry)
+
+
+@pytest.mark.skipif(not _harness_token_present(), reason=_SKIP_REASON)
+def test_references_add_then_remove_round_trip(
+    _registry: TaskRegistry,
+    _sandbox: tuple[str, str],
+) -> None:
+    """Create a task → attach a URL ref → assert present → remove → assert gone → delete."""
+    plan_id, bucket_id = _sandbox
+    title = f"harness refs {uuid.uuid4()}"
+    url = f"https://example.com/{uuid.uuid4()}"
+
+    created = create_planner_task(
+        plan_id,
+        bucket_id,
+        title,
+        profile=HARNESS_PROFILE,
+        registry=_registry,
+    )
+    task_id = str(created["id"])
+    try:
+        with_ref = add_planner_task_reference(
+            task_id,
+            url,
+            alias="Spec doc",
+            type_hint="Other",
+            profile=HARNESS_PROFILE,
+            registry=_registry,
+        )
+        urls = [r["url"] for r in with_ref["references"]]
+        assert url in urls
+        ref_entry = next(r for r in with_ref["references"] if r["url"] == url)
+        assert ref_entry["alias"] == "Spec doc"
+        assert ref_entry["type"] == "Other"
+
+        without_ref = remove_planner_task_reference(
+            task_id,
+            url,
+            profile=HARNESS_PROFILE,
+            registry=_registry,
+        )
+        urls_after = [r["url"] for r in without_ref["references"]]
+        assert url not in urls_after
     finally:
         delete_planner_task(task_id, profile=HARNESS_PROFILE, registry=_registry)
