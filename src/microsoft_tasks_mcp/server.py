@@ -31,6 +31,10 @@ from mcp.types import ToolAnnotations
 from microsoft_tasks_mcp.auth.flow import writes_enabled
 from microsoft_tasks_mcp.tools.login_begin import login_begin as _do_login_begin
 from microsoft_tasks_mcp.tools.login_status import login_status as _do_login_status
+from microsoft_tasks_mcp.tools.todo_list_get import get_todo_list as _do_todo_list_get
+from microsoft_tasks_mcp.tools.todo_lists import list_todo_lists as _do_todo_lists
+from microsoft_tasks_mcp.tools.todo_task_get import get_todo_task as _do_todo_task_get
+from microsoft_tasks_mcp.tools.todo_tasks import list_todo_tasks as _do_todo_tasks
 
 PROFILE_ENV = "TASKS_PROFILE"
 DEFAULT_PROFILE = "default"
@@ -125,11 +129,97 @@ def register_login_tools(mcp_instance: FastMCP) -> None:
 def register_read_tools(mcp_instance: FastMCP) -> None:
     """Register the unconditionally-available read tools.
 
-    Placeholder for v0.1 — the To Do, Planner, and cross-source read
-    tools will land in subsequent chunks. Calling this function on a
-    server is a no-op until those tools are implemented.
+    Currently registers the four Microsoft To Do read tools
+    (`todo_lists`, `todo_list_get`, `todo_tasks`, `todo_task_get`).
+    Planner + cross-source tools land in subsequent chunks.
     """
-    del mcp_instance  # nothing to register yet
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="List Microsoft To Do Lists",
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "List the signed-in user's Microsoft To Do lists. Each "
+            "list has `id`, `display_name`, `is_owner`, `is_shared`, "
+            "`well_known_list_name` (e.g. 'defaultList' for the "
+            "built-in Tasks list, 'flaggedEmails' for the Outlook "
+            "flagged-mails list, or None for user-created lists), and "
+            "`etag`. Read-only — does not modify anything. To list "
+            "tasks within a list, pass the returned `id` to "
+            "`todo_tasks`."
+        ),
+    )
+    def todo_lists(limit: int = 50) -> list[dict[str, Any]]:
+        return _do_todo_lists(limit=limit, profile=_get_profile())
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Get Microsoft To Do List",
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Fetch a single Microsoft To Do list by id. Same shape as "
+            "an entry returned by `todo_lists`. Read-only."
+        ),
+    )
+    def todo_list_get(list_id: str) -> dict[str, Any]:
+        return _do_todo_list_get(list_id, profile=_get_profile())
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="List Microsoft To Do Tasks",
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "List tasks in a Microsoft To Do list. Returns each task "
+            "in the unified envelope: `id`, `title`, `status` "
+            "(`completed`/`not_completed`), `due_date`, `assignees` "
+            "(empty for To Do — per-user surface), `web_url` (None "
+            "for To Do — no public deep-link), `source` (always "
+            "`'todo'`), `etag` (for write concurrency), `list_id`, "
+            "`body_preview`, `categories`, `importance`, "
+            "`reminder_date`, `is_reminder_on`, "
+            "`last_modified_date_time`, `created_date_time`. "
+            "`status_filter` defaults to `'all'`; pass `'completed'` "
+            "or `'not_completed'` to narrow."
+        ),
+    )
+    def todo_tasks(
+        list_id: str,
+        status_filter: str = "all",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        return _do_todo_tasks(
+            list_id,
+            status_filter=status_filter,
+            limit=limit,
+            profile=_get_profile(),
+        )
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Get Microsoft To Do Task",
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Fetch one Microsoft To Do task by id within its list. "
+            "Both `list_id` and `task_id` are required — Microsoft "
+            "Graph has no global task-by-id endpoint for To Do. "
+            "Returns the unified task envelope (same shape as items "
+            "in `todo_tasks`). Read-only."
+        ),
+    )
+    def todo_task_get(list_id: str, task_id: str) -> dict[str, Any]:
+        return _do_todo_task_get(list_id, task_id, profile=_get_profile())
 
 
 def register_write_tools(mcp_instance: FastMCP) -> None:
