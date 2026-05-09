@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
-# Contributing to OSS Project Template
+# Contributing to mcp-server-microsoft-tasks
 
 Thank you for your interest in contributing to this project! This document provides guidelines for contributing.
 
@@ -23,8 +23,8 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
 
 ```bash
 # Clone the repository
-git clone https://github.com/XMV-Solutions-GmbH/oss-project-template.git
-cd oss-project-template
+git clone https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp.git
+cd microsoft-tasks-mcp
 
 # Configure your project
 # Edit repo.ini with your project details
@@ -72,7 +72,7 @@ Every source file MUST start with an SPDX licence identifier:
 ### 1. Fork the Repository
 
 ```bash
-gh repo fork XMV-Solutions-GmbH/oss-project-template
+gh repo fork XMV-Solutions-GmbH/microsoft-tasks-mcp
 ```
 
 ### 2. Create a Feature Branch

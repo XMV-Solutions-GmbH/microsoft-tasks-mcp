@@ -25,9 +25,9 @@ Anything that applies to **humans too** lives in `ENGINEERING_PRINCIPLES.md`, no
 
 ### What this repo is
 
-`<PROJECT_NAME>` — one-sentence description.
+`mcp-server-microsoft-tasks` — an MCP server that wraps Microsoft Planner + Microsoft To Do (the Microsoft Tasks family) so AI coding agents can read, search, and **carefully** create tasks across both surfaces, **without ever modifying tasks the agent did not create itself**.
 
-Full vision and scope in [`docs/app-concept.md`](docs/app-concept.md). Read it before changing anything that touches the public surface.
+Full vision, tool surface, auth model, and conflict semantics in [`docs/app-concept.md`](docs/app-concept.md). Read it before changing anything that touches the public surface — especially anything tied to the per-profile registry or the `TASKS_ALLOW_WRITES` opt-in.
 
 ### Project-specific docs
 
@@ -44,7 +44,7 @@ Full vision and scope in [`docs/app-concept.md`](docs/app-concept.md). Read it b
 
 ### Tracker
 
-**GitHub Issues + the repo-bound GitHub Project** at `https://github.com/<ORG>/<REPO>/issues`. See [`ENGINEERING_PRINCIPLES.md` § 2](ENGINEERING_PRINCIPLES.md). No `docs/todo.md` or other markdown TODO files.
+**GitHub Issues + the repo-bound GitHub Project** at <https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues>. See [`ENGINEERING_PRINCIPLES.md` § 2](ENGINEERING_PRINCIPLES.md). No `docs/todo.md` or other markdown TODO files.
 
 Recommended labels: `type:feat` / `type:fix` / `type:chore` / `type:docs` / `type:test`; `area:<component>`; `priority:p0` / `p1` / `p2`. Add `agent:<tool-name>` (e.g. `agent:claude`, `agent:codex`) when an AI agent is the executor.
 
@@ -52,17 +52,21 @@ Issue body convention: `## Context`, `## Acceptance criteria` (checkbox list), `
 
 ### Tech stack
 
-<!-- Languages, frameworks, runtimes, package managers, lint/format
-     tooling, test frameworks, deployment/distribution surface. -->
-
-- TBD
+- **Python 3.11+**, packaged for `uvx` / `pipx` install.
+- **MCP Python SDK** (`mcp[cli]`) with FastMCP for the protocol layer.
+- **`mcp-microsoft-graph-auth`** (sister library on PyPI) for the Device Code flow, token store, login session registry, public-view shape. Same auth primitives as `mcp-server-sharepoint` and `mcp-server-outlook`.
+- **`httpx`** for raw Microsoft Graph calls.
+- **Tests**: `pytest` + `pytest-asyncio` + `respx` for HTTP boundary mocks; harness layer hits the real Microsoft Graph against a dedicated M365 sandbox.
+- **Lint/format**: `ruff` (replacing flake8 + black + isort), `mypy` strict.
+- **Build**: `uv` for lock + sync + build. Hatchling backend.
+- **Auth scopes (delegated)**: `Tasks.Read` (always), `Tasks.ReadWrite` (only when `TASKS_ALLOW_WRITES=true`), `Group.Read.All` (Planner — admin-consent), `User.Read`, `offline_access`.
 
 ### Project-specific overrides of the engineering baseline
 
-<!-- Document deviations from ENGINEERING_PRINCIPLES.md here, with the
-     paragraph reference and a one-line justification. -->
-
-- TBD
+- **PR workflow already triggered (per § 13).** From the moment `mcp-server-microsoft-tasks` is on PyPI, treat `main` as deployable trunk: feature branches + PRs, branch protection on `main`, CI green required for merge. Until the first published release, direct commits to `main` are acceptable for chores and docs (and have been used during the bootstrap).
+- **Test environment (per § 5).** A dedicated M365 group + Planner plan + To Do test list in the XMV tenant — see `docs/app-concept.md` § Testability. Credentials live in GitHub Actions secrets for CI (`MS_TASKS_HARNESS_TOKEN_JSON`) and in a developer-local profile (`harness`) for iterative work.
+- **Harness token renewal.** Monthly recurring chore: Microsoft refresh tokens rotate every ~60–90 days, so the `MS_TASKS_HARNESS_TOKEN_JSON` repo secret has to be refreshed before CI's harness job starts failing. Same shape as `sharepoint-mcp`'s `scripts/renew-harness-token.sh`.
+- **Non-blocking login from day one (per § 5 and the outlook v0.3.0 incident).** `tasks_login_begin` MUST return immediately with `status="pending"` plus `user_code` + `verification_url`; never block on the polling task. The agent polls `tasks_login_status` for state changes. Blocking deadlocks the UX on clients that don't render progress notifications.
 
 ### License header for new source files
 

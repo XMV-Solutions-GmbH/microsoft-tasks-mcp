@@ -1,173 +1,83 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
-<!-- test: verify branch protection -->
-# OSS Project Template
 
-[![Licence](https://img.shields.io/badge/licence-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
-[![CI](https://github.com/XMV-Solutions-GmbH/oss-project-template/actions/workflows/ci.yml/badge.svg)](https://github.com/XMV-Solutions-GmbH/oss-project-template/actions/workflows/ci.yml)
-[![Coverage Status](https://coveralls.io/repos/github/XMV-Solutions-GmbH/oss-project-template/badge.svg?branch=main)](https://coveralls.io/github/XMV-Solutions-GmbH/oss-project-template?branch=main)
-[![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/XMV-Solutions-GmbH/oss-project-template/issues)
+# mcp-server-microsoft-tasks
 
-🚀 **Production-ready template for AI-assisted open source development.**
+[![Licence](https://img.shields.io/badge/licence-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/blob/main/LICENSE)
+[![CI](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/actions/workflows/ci.yml)
+[![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues)
 
-This template provides everything you need to start a professional open source project with optimised support for AI-assisted development using GitHub Copilot or similar tools.
+> **In one sentence:** an [MCP](https://modelcontextprotocol.io) server that lets AI coding agents read and **carefully** write your **Microsoft Planner + Microsoft To Do** tasks — never modifying tasks the agent didn't create itself.
 
----
+## Status — pre-alpha
 
-## ✨ Features
+**Not yet on PyPI.** The repository was bootstrapped on 2026-05-09 from the [`oss-project-template`](https://github.com/XMV-Solutions-GmbH/oss-project-template) v0.3.0; the design is captured in [`docs/app-concept.md`](docs/app-concept.md). No tools are wired up yet — that lands with v0.1.0.
 
-- **AI-First Development** — Copilot instructions optimised for autonomous quality assurance
-- **Test Harness Patterns** — Tech-stack agnostic testing strategies for AI verification
-- **GitHub Automation** — Branch protection, team assignment, and CI/CD workflows
-- **Configurable Setup** — Single `repo.ini` file for project-specific customisation
-- **Dual Licence** — MIT OR Apache-2.0 for maximum compatibility
+Track progress at <https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues>.
 
----
+## What is this for?
 
-## 🚀 Quick Start
+You work across multiple Microsoft 365 tenants (consultancy, customer engagements, your own org). Tasks are scattered across:
 
-### 1. Create Your Repository
+- **Microsoft To Do** — your personal task lists, the place flagged emails land, the place ad-hoc reminders go.
+- **Microsoft Planner** — group-scoped boards, one per M365 group / Team, where collaborative work lives.
 
-Use this template to create a new repository:
+Surfacing "what do I have to do today" already requires the user to mentally union both. Worse, popular AI agents that *can* talk to Microsoft 365 either:
 
-```bash
-# Via GitHub CLI
-gh repo create YOUR-ORG/YOUR-REPO --template XMV-Solutions-GmbH/oss-project-template --public
+- bypass Microsoft's modern auth (broken attribution),
+- can't see the multi-tenant boundary,
+- or auto-modify tasks created by other people (terrifying).
 
-# Or click "Use this template" on GitHub
-```
+`mcp-server-microsoft-tasks` fixes all three: **local process per tenant, multi-profile, Microsoft Graph for full attribution, read-only by default, writes opt-in, agent-created-only**. The per-profile registry is the hard gate — write tools refuse to touch any task whose ID isn't in the registry of "tasks this profile created".
 
-### 2. Configure Your Project
+Sister project to [`mcp-server-sharepoint`](https://github.com/XMV-Solutions-GmbH/sharepoint-mcp) and [`mcp-server-outlook`](https://github.com/XMV-Solutions-GmbH/outlook-mcp). Same authorship pattern, same auth shape (`mcp-microsoft-graph-auth`), different surface.
 
-Edit `repo.ini` with your project details:
+## Planned tool surface
 
-```ini
-ORG="YOUR-ORG"
-REPO="YOUR-REPO"
-PROJECT_NAME="Your Project Name"
-PROJECT_DESCRIPTION="Your project description"
-```
+### v0.1 (read + login)
 
-### 3. Run Setup Scripts
+| Tool | What it does |
+|---|---|
+| `tasks_login_begin`, `tasks_login_status` | Non-blocking Device Code login, polled by the agent |
+| `todo_lists`, `todo_list_get`, `todo_tasks`, `todo_task_get` | Microsoft To Do — per-user task lists |
+| `planner_plans`, `planner_plan_get`, `planner_buckets`, `planner_tasks`, `planner_task_get` | Microsoft Planner — group-scoped plans |
+| `tasks_assigned_to_me` | Cross-source: To Do + Planner items currently assigned to the signed-in user |
+| `tasks_search` | Cross-source substring search |
 
-```bash
-# Assign repository to team
-./.github/gh-scripts/assign-repo-to-team.sh
+### v0.2 (write, opt-in via `TASKS_ALLOW_WRITES=true`)
 
-# Set up branch protection
-./.github/gh-scripts/setup-branch-protection.sh
-```
+| Tool | What it does |
+|---|---|
+| `todo_task_create`, `todo_task_update`, `todo_task_complete`, `todo_task_delete` | Per-profile-registry-gated writes on To Do tasks |
+| `planner_task_create`, `planner_task_update`, `planner_task_complete`, `planner_task_delete` | Per-profile-registry-gated writes on Planner tasks |
+| `tasks_status` | Inspect this profile's "I created this" registry |
 
-### 4. Create Project Documentation
+Full surface, auth model, and conflict/safety semantics in [`docs/app-concept.md`](docs/app-concept.md).
 
-Before writing any code:
-
-- Replace the placeholders in [AGENTS.md](AGENTS.md) (project name, tech stack, project-specific overrides, licence-header values). This is the canonical, tool-agnostic brief every AI agent reads — Codex auto-discovers it, and `CLAUDE.md` + `.github/copilot-instructions.md` are five-line pointers back to it.
-- Read [ENGINEERING_PRINCIPLES.md](ENGINEERING_PRINCIPLES.md) — the project-agnostic baseline that applies to every XMV OSS project. Don't fork or rewrite it; if a principle improves, back-port it across projects.
-- Write [docs/app-concept.md](docs/app-concept.md) — project vision, scope, and the **Testability** section required by [§ 5 of the principles](ENGINEERING_PRINCIPLES.md).
-- Open the repo's GitHub Project and start filing issues there. Per [§ 2 of the principles](ENGINEERING_PRINCIPLES.md), GitHub Issues + Projects is the authoritative tracker from day one — no `docs/todo.md`.
-
----
-
-## 📁 Repository Structure
-
-```text
-.
-├── .github/
-│   ├── copilot-instructions.md    # 5-line pointer → AGENTS.md (Copilot auto-discovery)
-│   ├── CODEOWNERS                 # Code review assignment
-│   ├── gh-scripts/                # One-shot bootstrap scripts (read repo.ini)
-│   │   ├── assign-repo-to-team.sh
-│   │   └── setup-branch-protection.sh
-│   └── workflows/                 # CI/CD pipelines (+ HARNESS_JOB.md snippet)
-├── docs/
-│   ├── app-concept.md             # Project vision + Testability section
-│   ├── howto-oss.md               # OSS setup guide
-│   ├── markdown-style.md          # Markdown linting rules (load on demand)
-│   ├── proposals/                 # RFCs / spike notes / architectural decisions
-│   └── testconcept.md             # Per-project test layer instantiation
-├── scripts/                       # Operational scripts (per § 8)
-├── tests/
-│   └── run_tests.sh               # Test runner
-├── AGENTS.md                      # Canonical AI-agent brief (Codex auto-discovery)
-├── CHANGELOG.md                   # Version history (Keep a Changelog)
-├── CLAUDE.md                      # 5-line pointer → AGENTS.md (Claude Code auto-discovery)
-├── CODE_OF_CONDUCT.md             # Community standards
-├── CONTRIBUTING.md                # Contribution guidelines
-├── ENGINEERING_PRINCIPLES.md      # Project-agnostic engineering baseline
-├── LICENSE                        # MIT licence
-├── LICENSE-APACHE                 # Apache 2.0 licence
-├── LICENSE-MIT                    # MIT licence
-├── README.md                      # This file
-├── repo.ini                       # Project configuration
-└── SECURITY.md                    # Security policy
-```
-
----
-
-## 🧪 AI-Assisted Development
-
-This template is designed for **AI-first development**. The key principle:
-
-> **Test harness before implementation.**
-
-Every project must have a local test harness that:
-
-1. Runs entirely on the command line
-2. Executes without external dependencies (mocks where necessary)
-3. Mirrors production as closely as possible
-4. Provides clear pass/fail output
-
-This enables AI agents to autonomously verify their implementations.
-
-See [docs/testconcept.md](docs/testconcept.md) for detailed testing strategies.
-
----
-
-## 📚 Documentation
+## Documentation
 
 | Document | Description |
-| -------- | ----------- |
-| [Engineering Principles](ENGINEERING_PRINCIPLES.md) | Project-agnostic baseline — read first |
-| [AGENTS.md](AGENTS.md) | Canonical AI-agent brief (tool-agnostic — Codex / Claude Code / Copilot all read this) |
-| [Markdown style](docs/markdown-style.md) | Lint rules, loaded on demand when editing Markdown |
-| [How-To: OSS Setup](docs/howto-oss.md) | Complete guide to setting up OSS projects |
-| [Test Concept](docs/testconcept.md) | Testing strategies for AI-assisted development |
-| [Contributing](CONTRIBUTING.md) | How to contribute to this project |
-| [Security Policy](SECURITY.md) | How to report vulnerabilities |
+|---|---|
+| [App concept](docs/app-concept.md) | Vision, tool surface, auth model, conflict semantics, Testability |
+| [Engineering principles](ENGINEERING_PRINCIPLES.md) | XMV's project-agnostic baseline (test layers, source-control, PR discipline) |
+| [AGENTS.md](AGENTS.md) | Brief for AI coding agents — project facts, tech stack, behaviour rules |
+| [Contributing](CONTRIBUTING.md) | Contribution flow |
+| [Security](SECURITY.md) | Vulnerability disclosure |
+| [Changelog](CHANGELOG.md) | Keep-a-changelog history |
 
----
+## Licence
 
-## 🤝 Contributing
-
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) first.
-
-### Quick Contribution Guide
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Make your changes with tests
-4. Commit: `git commit -m 'feat: add amazing feature'`
-5. Push: `git push origin feature/amazing-feature`
-6. Open a Pull Request
-
----
-
-## 📄 Licence
-
-Licensed under either of:
+Dual-licensed under either of:
 
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+- MIT License ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
 
 at your option.
 
 ### Contribution
 
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this project by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this project by you, as defined in the Apache-2.0 licence, shall be dual-licensed as above, without any additional terms or conditions.
 
----
-
-## 📬 Contact
+## Contact
 
 - **Organisation**: XMV Solutions GmbH
 - **Email**: <oss@xmv.de>

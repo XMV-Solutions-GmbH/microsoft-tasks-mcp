@@ -1,21 +1,10 @@
-# Three-job shape inherited from sister projects (sharepoint-mcp,
-# outlook-mcp): lint / test / harness. The lint and test jobs run on
-# every push and PR. The harness job is OPTIONAL but recommended for
-# projects that talk to external services — see
-# .github/workflows/HARNESS_JOB.md for the canonical snippet to drop
-# in once the project has provisioned a sandbox account and a secret
-# carrying the credential.
+# Three-job CI: lint / test / harness. Same shape as the sister
+# Microsoft-Graph MCP projects (sharepoint-mcp, outlook-mcp). The
+# harness job is gated behind a repo secret and skips silently when
+# absent, so PRs from forks don't get blocked.
 #
-# The job bodies below are kept minimal and language-neutral. Replace
-# the lint and test steps with the toolchain your project needs (uv +
-# ruff + pytest; cargo fmt + cargo test; npm lint + npm test; etc.).
-# Keep the job names (lint / test / harness) so branch protection's
-# required status checks (configured via repo.ini > STATUS_CHECKS)
-# keep matching.
-#
-# Per ENGINEERING_PRINCIPLES.md § 6 (CI vigilance): every push is
-# watched to completion. Trunk red is a P0 incident. Required status
-# checks should match this workflow's job names exactly.
+# Per ENGINEERING_PRINCIPLES § 6 (CI vigilance): every push is watched
+# to completion; trunk red is a P0 incident.
 
 name: CI
 
@@ -30,17 +19,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
       - name: Lint Markdown
-        uses: DavidAnson/markdownlint-cli2-action@v22
+        uses: DavidAnson/markdownlint-cli2-action@v23
         with:
           globs: |
             **/*.md
-      # Add language-specific linters here. Examples:
-      # - uv run ruff check src tests
-      # - uv run ruff format --check src tests
-      # - uv run mypy src tests
-      # - cargo fmt --check ; cargo clippy -- -D warnings
-      # - npm run lint ; npx prettier --check .
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install package + dev dependencies
+        run: uv sync --extra dev
+
+      - name: ruff check
+        run: uv run ruff check src tests
+
+      - name: ruff format check
+        run: uv run ruff format --check src tests
+
+      - name: mypy
+        run: uv run mypy src/microsoft_tasks_mcp tests
 
   test:
     runs-on: ubuntu-latest
@@ -48,22 +52,68 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Compare licences
-        run: |
-          diff LICENSE LICENSE-MIT
+        run: diff LICENSE LICENSE-MIT
 
-      - name: Install bats-core
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bats
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
 
-      - name: Run tests
-        run: |
-          ./tests/run_tests.sh
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
 
-      # Replace the bats steps above with the project's actual test
-      # runner. Examples:
-      # - uv sync --extra dev && uv run pytest
-      # - cargo test
-      # - npm ci && npm test
-      # Upload coverage via codecov/codecov-action@v5 when
-      # CODECOV_TOKEN_SECRET is configured in repo.ini.
+      - name: Install package + dev dependencies
+        run: uv sync --extra dev
+
+      - name: Run unit + integration tests with coverage
+        run: ./tests/run_tests.sh
+
+      - name: Upload coverage to Codecov
+        if: ${{ hashFiles('coverage.xml') != '' }}
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+          verbose: false
+
+  harness:
+    runs-on: ubuntu-latest
+    needs: test
+    # Run harness tests against the real Microsoft 365 sandbox using the
+    # cached refresh token from the MS_TASKS_HARNESS_TOKEN_JSON secret.
+    # Skips silently when the secret isn't available (e.g. on PRs from
+    # forks where secrets aren't passed) so external contributions
+    # aren't blocked on something they can't provide.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install package + dev dependencies
+        run: uv sync --extra dev
+
+      - name: Restore harness token cache from secret
+        env:
+          TOKEN_B64: ${{ secrets.MS_TASKS_HARNESS_TOKEN_JSON }}
+        run: |
+          if [ -z "$TOKEN_B64" ]; then
+            echo "::warning::MS_TASKS_HARNESS_TOKEN_JSON not set — harness tests will be skipped."
+            exit 0
+          fi
+          mkdir -p ~/.cache/mcp-server-microsoft-tasks/harness
+          printf '%s' "$TOKEN_B64" | base64 -d > ~/.cache/mcp-server-microsoft-tasks/harness/token.json
+          chmod 600 ~/.cache/mcp-server-microsoft-tasks/harness/token.json
+          echo "Harness token cache restored ($(wc -c < ~/.cache/mcp-server-microsoft-tasks/harness/token.json) bytes)."
+
+      - name: Run harness tests against real Microsoft Graph
+        env:
+          # Use plain-file backend explicitly (CI runners have no keyring).
+          MS_TASKS_TOKEN_STORE: file
+        run: ./tests/run_tests.sh harness
