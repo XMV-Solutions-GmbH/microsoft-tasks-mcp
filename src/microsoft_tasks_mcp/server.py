@@ -53,7 +53,19 @@ from microsoft_tasks_mcp.tools.tasks_search import search as _do_tasks_search
 from microsoft_tasks_mcp.tools.tasks_status import status as _do_tasks_status
 from microsoft_tasks_mcp.tools.todo_list_get import get_todo_list as _do_todo_list_get
 from microsoft_tasks_mcp.tools.todo_lists import list_todo_lists as _do_todo_lists
+from microsoft_tasks_mcp.tools.todo_task_complete import (
+    complete_todo_task as _do_todo_task_complete,
+)
+from microsoft_tasks_mcp.tools.todo_task_create import (
+    create_todo_task as _do_todo_task_create,
+)
+from microsoft_tasks_mcp.tools.todo_task_delete import (
+    delete_todo_task as _do_todo_task_delete,
+)
 from microsoft_tasks_mcp.tools.todo_task_get import get_todo_task as _do_todo_task_get
+from microsoft_tasks_mcp.tools.todo_task_update import (
+    update_todo_task as _do_todo_task_update,
+)
 from microsoft_tasks_mcp.tools.todo_tasks import list_todo_tasks as _do_todo_tasks
 
 PROFILE_ENV = "TASKS_PROFILE"
@@ -453,6 +465,117 @@ def register_write_tools(mcp_instance: FastMCP) -> None:
     )
     def tasks_status() -> list[dict[str, Any]]:
         return _do_tasks_status(profile=_get_profile())
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Create Microsoft To Do Task",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+        description=(
+            "Create a new Microsoft To Do task in `list_id`. The new "
+            "task is added to this MCP profile's registry — only "
+            "registry-tracked tasks can later be updated, completed, "
+            "or deleted via the matching write tools. `due_date` is "
+            "an ISO 8601 timestamp (treated as UTC). `importance` "
+            "is `'low'` / `'normal'` / `'high'`. Returns the unified "
+            "envelope of the new task."
+        ),
+    )
+    def todo_task_create(
+        list_id: str,
+        title: str,
+        body: str | None = None,
+        due_date: str | None = None,
+        importance: str | None = None,
+    ) -> dict[str, Any]:
+        return _do_todo_task_create(
+            list_id,
+            title,
+            body=body,
+            due_date=due_date,
+            importance=importance,
+            profile=_get_profile(),
+        )
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Update Microsoft To Do Task",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+        description=(
+            "PATCH a Microsoft To Do task this MCP profile created. "
+            "Only fields explicitly passed are changed. **Refuses** "
+            "(NOT_OWNED_BY_PROFILE) if `task_id` is not in this "
+            "profile's registry — hand-created tasks in To Do are "
+            "off-limits. Refuses (EXTERNALLY_MODIFIED) if Microsoft "
+            "Graph rejects the write because the task changed since "
+            "the agent last saw it (412 Precondition Failed via "
+            "`If-Match` ETag header). `status` accepts the unified "
+            "envelope values `'completed'` / `'not_completed'`. "
+            "Returns the updated task's envelope."
+        ),
+    )
+    def todo_task_update(
+        task_id: str,
+        title: str | None = None,
+        body: str | None = None,
+        due_date: str | None = None,
+        status: str | None = None,
+        importance: str | None = None,
+    ) -> dict[str, Any]:
+        return _do_todo_task_update(
+            task_id,
+            title=title,
+            body=body,
+            due_date=due_date,
+            status=status,
+            importance=importance,
+            profile=_get_profile(),
+        )
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Complete Microsoft To Do Task",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Mark a Microsoft To Do task this MCP profile created as "
+            "completed. Convenience wrapper around `todo_task_update` "
+            "with `status='completed'`. Same NOT_OWNED_BY_PROFILE / "
+            "EXTERNALLY_MODIFIED guards apply."
+        ),
+    )
+    def todo_task_complete(task_id: str) -> dict[str, Any]:
+        return _do_todo_task_complete(task_id, profile=_get_profile())
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Delete Microsoft To Do Task",
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Delete a Microsoft To Do task this MCP profile created. "
+            "**Refuses** (NOT_OWNED_BY_PROFILE) if not in the "
+            "profile's registry — hand-typed tasks in To Do are "
+            "off-limits. Idempotent: re-deleting a task already gone "
+            "server-side is a silent no-op (registry entry is "
+            "cleaned up either way). Returns no value on success."
+        ),
+    )
+    def todo_task_delete(task_id: str) -> None:
+        _do_todo_task_delete(task_id, profile=_get_profile())
 
 
 def _build_server() -> FastMCP:
