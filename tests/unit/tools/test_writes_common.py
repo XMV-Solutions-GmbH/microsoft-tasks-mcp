@@ -90,7 +90,7 @@ def test_validate_recurrence_accepts_schedule_null_for_cancellation() -> None:
 
 def test_validate_recurrence_rejects_non_dict_top_level() -> None:
     with pytest.raises(ValueError, match="recurrence must be a dict"):
-        validate_planner_recurrence("weekly")  # type: ignore[arg-type]
+        validate_planner_recurrence("weekly")
 
 
 def test_validate_recurrence_requires_schedule_key() -> None:
