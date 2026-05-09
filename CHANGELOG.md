@@ -10,6 +10,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Tracked in [GitHub Issues](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues).
 
+## [v0.3.0] — 2026-05-09
+
+UX-gap closures from v0.1/v0.2 plus a non-admin-tenant escape hatch.
+
+### Added
+
+- **Planner deep-links** (`web_url`) for both `planner_*` tools and the cross-source surface. The unified envelope's `web_url` field is no longer always `None` for Planner tasks — it's populated to `https://tasks.office.com/{tenant_id}/Home/Task/{task_id}` where `tenant_id` is extracted from the access token's JWT `tid` claim (no extra `/me` round-trip needed). Closes [#27](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues/27). To Do `web_url` remains `None` — there's no documented stable public deep-link pattern for Microsoft To Do; documented inline.
+- **`MS_TASKS_NO_PLANNER=true`** env flag for non-admin-tenant users. Microsoft Planner requires `Group.Read.All` (admin-consent in most tenants) — with this flag set, the OAuth scope request drops `Group.Read.All`, the MCP server skips registering all `planner_*` read + write tools, and the cross-source tools (`tasks_assigned_to_me`, `tasks_search`) silently exclude the Planner half. Lets users who only care about Microsoft To Do install without an admin's blessing. Closes [#28](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues/28).
+- **Helper `tools/_common.tenant_id_from_token`** — JWT-payload `tid` claim extractor (base64url decode + JSON parse, defensive about malformed tokens). Used for deep-link construction; no signature verification (the token came from the trusted token endpoint and we already use it as a bearer credential).
+- **RFC `docs/proposals/2026-05-09-graph-search-api-spike.md`** — empirical spike result against Microsoft Graph Search API for `tasks_search`. Outcome: **Withdrawn**. The Graph Search API doesn't support `plannerTask` / `todoTask` entity types (400 BadRequest at the call layer), and the supported types require admin-consent scopes that conflict with `MS_TASKS_NO_PLANNER`. Client-side `tasks_search` stays canonical. Closes [#29](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues/29).
+- **README v0.2 write-flow dialogue** — second use-case example showing `planner_task_create` x3 + `todo_task_create` + `planner_task_complete`, with the `NOT_OWNED_BY_PROFILE` registry guarantee shown in agent dialogue. Closes [#30](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues/30).
+
+### Changed
+
+- **Server registration restructured.** The five Planner read tools moved from `register_read_tools` to a new `register_planner_read_tools`; the four Planner write tools moved to a new `register_planner_write_tools`. `_build_server` calls them conditionally based on `planner_disabled()`. To Do + cross-source registrations stay in `register_read_tools` / `register_write_tools` and are unaffected.
+- **`auth/flow.resolve_scopes()` rewritten** to compose scopes from the two independent flags (`TASKS_ALLOW_WRITES`, `MS_TASKS_NO_PLANNER`). Default install behaviour unchanged: `Tasks.Read` + `Group.Read.All` + `User.Read` + `offline_access`.
+- **AGENTS.md** project-stack section now lists every env flag.
+
+### Engineering
+
+- 345 unit + integration tests + 23 harness tests against real Microsoft Graph (incl. new test confirming the constructed Planner deep-link is reachable, and 3 To Do + 3 Planner write tests that already exercised the harness sandbox provisioned in v0.2).
+
 ## [v0.2.0] — 2026-05-09
 
 Write tools opt-in via `TASKS_ALLOW_WRITES=true`. The load-bearing safety guarantee — the agent never modifies tasks it did not create itself — is enforced by a per-profile on-disk registry and ETag-based optimistic concurrency.
@@ -86,6 +108,7 @@ First public release. Read-only MVP across **Microsoft Planner + Microsoft To Do
 - `tasks_search` is client-side because neither Microsoft surface exposes server-side task search. Spike on the Microsoft Graph Search API (`/search/query`) is on the v0.2+ roadmap.
 - Harness account `d.koller@xmv.de` currently has no Planner plans visible. Planner harness tests skip defensively. Adding the harness account to a Planner-enabled M365 group would activate the round-trip assertions.
 
-[Unreleased]: https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/compare/v0.3.0...HEAD
+[v0.3.0]: https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/releases/tag/v0.3.0
 [v0.2.0]: https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/releases/tag/v0.2.0
 [v0.1.0]: https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/releases/tag/v0.1.0
