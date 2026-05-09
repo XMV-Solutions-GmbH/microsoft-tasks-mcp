@@ -1,0 +1,248 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 XMV Solutions GmbH
+# SPDX-FileContributor: David Koller <david.koller@xmv.de>
+"""Authentication public API.
+
+Two entry points:
+
+- `get_token(profile)` — silent path. Returns a fresh access token from
+  the cached refresh token. Refreshes through Microsoft Identity if
+  needed. Never blocks on user interaction. Raises `AuthRequiredError`
+  if the cache is empty or the refresh token has been invalidated; the
+  caller is expected to surface that to the human and arrange
+  `interactive_login()` to be invoked separately.
+- `interactive_login(profile)` — out-of-band path. Drives the full
+  Device Code flow, blocks until the human completes (or refuses) the
+  prompt, persists the resulting tokens to the configured TokenStore.
+  Intended to be invoked from a CLI subcommand
+  (`mcp-server-microsoft-tasks login`), not from inside an MCP tool call.
+
+This split mirrors how `gh auth login` separates from `gh` runtime
+calls: the MCP server does not pause to do interactive auth in the
+middle of a tool call.
+
+`TASKS_CLIENT_ID` and `TASKS_TENANT_ID` env vars override the bundled
+multi-tenant defaults — see `docs/app-concept.md` § Auth model.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import webbrowser
+from collections.abc import Callable
+
+import httpx
+
+from microsoft_tasks_mcp.auth.flow import (
+    DEFAULT_AUTHORITY_TENANT,
+    DEFAULT_CLIENT_ID,
+    AuthorizationDeniedError,
+    DeviceCodeChallenge,
+    DeviceCodeError,
+    DeviceCodeExpiredError,
+    RefreshTokenInvalidError,
+    poll_for_token,
+    refresh_access_token,
+    request_device_code,
+    resolve_scopes,
+)
+from microsoft_tasks_mcp.auth.store import TokenStore, get_token_store
+from microsoft_tasks_mcp.auth.tokens import CachedToken
+
+CLIENT_ID_ENV = "TASKS_CLIENT_ID"
+TENANT_ENV = "TASKS_TENANT_ID"
+
+__all__ = [
+    "AuthRequiredError",
+    "AuthorizationDeniedError",
+    "CachedToken",
+    "DeviceCodeChallenge",
+    "DeviceCodeError",
+    "DeviceCodeExpiredError",
+    "RefreshTokenInvalidError",
+    "get_token",
+    "interactive_login",
+]
+
+
+class AuthRequiredError(RuntimeError):
+    """No usable cached token; the caller must trigger `interactive_login`.
+
+    Raised by `get_token` when (a) the cache is empty for this profile,
+    (b) the cached access token expired and there is no refresh token
+    to use, or (c) Microsoft Identity rejected the refresh token (the
+    expired-after-too-long-idle case).
+
+    The MCP tool layer should catch this, surface a clear message to
+    the agent (and through it to the user), and stop. Re-authentication
+    happens out of band via `uvx mcp-server-microsoft-tasks login`.
+    """
+
+    def __init__(self, profile: str, reason: str) -> None:
+        super().__init__(
+            f"No usable credentials for profile {profile!r}: {reason}. "
+            f"Run `uvx mcp-server-microsoft-tasks login --profile {profile}` to sign in.",
+        )
+        self.profile = profile
+        self.reason = reason
+
+
+def _resolve_client_id(client_id: str | None) -> str:
+    if client_id:
+        return client_id
+    env = os.environ.get(CLIENT_ID_ENV, "").strip()
+    return env or DEFAULT_CLIENT_ID
+
+
+def _resolve_tenant(tenant: str | None) -> str:
+    if tenant:
+        return tenant
+    env = os.environ.get(TENANT_ENV, "").strip()
+    return env or DEFAULT_AUTHORITY_TENANT
+
+
+def _has_desktop_session() -> bool:
+    """Heuristic: true iff there's likely a usable graphical browser."""
+    if sys.platform == "darwin" or sys.platform.startswith("win"):
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def _default_prompt(challenge: DeviceCodeChallenge) -> None:
+    """Show the Device Code challenge to the human running login.
+
+    Output format follows the saved auto-memory `feedback_device_code_prompt_format`:
+    code FIRST in its own one-line code block (no labels), URL SECOND on
+    its own line as a plain auto-link. Mobile-friendly copy → click → paste.
+
+    On a desktop session, also tries to open the verification URL
+    automatically so the page is one click away.
+    """
+    target_uri = challenge.verification_uri_complete or challenge.verification_uri
+
+    opened = False
+    if _has_desktop_session():
+        try:
+            opened = webbrowser.open(target_uri, new=2)
+        except webbrowser.Error:
+            opened = False
+
+    if opened:
+        header = "Opening your browser to complete sign-in. If it didn't open, paste the URL below."
+    else:
+        header = "Sign in to mcp-server-microsoft-tasks via the Device Code flow."
+
+    # Code first, in its own bare code block; URL second, plain auto-link.
+    print(
+        (
+            f"\n{header}\n\n"
+            f"```\n{challenge.user_code}\n```\n\n"
+            f"{challenge.verification_uri}\n\n"
+            "Waiting for sign-in..."
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def get_token(
+    profile: str = "default",
+    *,
+    client_id: str | None = None,
+    tenant: str | None = None,
+    store: TokenStore | None = None,
+    http: httpx.Client | None = None,
+) -> str:
+    """Return a valid access token for `profile`.
+
+    Reads from the configured TokenStore, refreshes through Microsoft
+    Identity if needed.
+
+    Raises:
+        AuthRequiredError: no cached entry, no refresh token, or the
+            refresh token was rejected. The caller must trigger
+            `interactive_login` to recover.
+    """
+    resolved_client = _resolve_client_id(client_id)
+    resolved_tenant = _resolve_tenant(tenant)
+    resolved_store = store if store is not None else get_token_store()
+
+    raw = resolved_store.get(profile)
+    if raw is None:
+        raise AuthRequiredError(profile, "no cached credentials found")
+
+    cached = CachedToken.from_json(raw.decode())
+    if not cached.is_expired():
+        return cached.access_token
+
+    if cached.refresh_token is None:
+        raise AuthRequiredError(
+            profile, "cached token has expired and no refresh token is available"
+        )
+
+    try:
+        new_token = refresh_access_token(
+            refresh_token=cached.refresh_token,
+            client_id=resolved_client,
+            tenant=resolved_tenant,
+            scopes=resolve_scopes(),
+            http=http,
+        )
+    except RefreshTokenInvalidError as exc:
+        resolved_store.delete(profile)
+        raise AuthRequiredError(
+            profile, f"refresh token rejected by Microsoft Identity ({exc})"
+        ) from exc
+
+    resolved_store.set(profile, new_token.to_json().encode())
+    return new_token.access_token
+
+
+def interactive_login(
+    profile: str = "default",
+    *,
+    client_id: str | None = None,
+    tenant: str | None = None,
+    store: TokenStore | None = None,
+    prompt: Callable[[DeviceCodeChallenge], None] | None = None,
+    http: httpx.Client | None = None,
+) -> CachedToken:
+    """Run the Device Code flow end-to-end. Blocks until completion.
+
+    On success: persists the issued tokens to `store` (or the
+    auto-detected store) under `profile`, and returns the `CachedToken`.
+
+    Raises:
+        AuthorizationDeniedError: user refused the prompt.
+        DeviceCodeExpiredError: device code expired before sign-in.
+
+    Intended to be invoked from a CLI subcommand or test. Do not call
+    from inside an MCP tool handler — it blocks for up to ~15 minutes.
+    The non-blocking MCP-tool path is `tasks_login_begin` /
+    `tasks_login_status` (Issue #6, not yet implemented).
+    """
+    resolved_client = _resolve_client_id(client_id)
+    resolved_tenant = _resolve_tenant(tenant)
+    resolved_store = store if store is not None else get_token_store()
+    resolved_prompt = prompt if prompt is not None else _default_prompt
+    # TASKS_ALLOW_WRITES-aware: appends Tasks.ReadWrite only when truthy.
+    scopes = resolve_scopes()
+
+    device_code, challenge = request_device_code(
+        client_id=resolved_client,
+        tenant=resolved_tenant,
+        scopes=scopes,
+        http=http,
+    )
+    resolved_prompt(challenge)
+
+    cached = poll_for_token(
+        device_code=device_code,
+        client_id=resolved_client,
+        tenant=resolved_tenant,
+        interval=challenge.interval,
+        http=http,
+    )
+    resolved_store.set(profile, cached.to_json().encode())
+    return cached
