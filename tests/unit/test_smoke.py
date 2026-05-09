@@ -18,4 +18,7 @@ def test_package_imports() -> None:
 
 
 def test_cli_main_returns_zero() -> None:
-    assert main() == 0
+    # Pass an explicit argv so argparse doesn't grab pytest's own sys.argv
+    # (CI invokes pytest with `-m unit`, which would otherwise be
+    # interpreted as a CLI subcommand).
+    assert main([]) == 0
