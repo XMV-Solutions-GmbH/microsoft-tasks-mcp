@@ -111,9 +111,13 @@ def _build_todo_web_url(task_id: Any, list_id: str) -> str | None:
     return None
 
 
-def planner_envelope(raw: dict[str, Any]) -> dict[str, Any]:
+def planner_envelope(raw: dict[str, Any], *, tenant_id: str | None = None) -> dict[str, Any]:
     """Convert a Microsoft Graph Planner task payload into the unified
     task envelope plus Planner-specific extras.
+
+    `tenant_id`, when given (typically resolved once per tool call from
+    the access token's JWT `tid` claim), is used to construct the
+    `web_url` deep-link. When None, `web_url` is None.
 
     Extras: `plan_id`, `bucket_id`, `priority` (int), `percent_complete`
     (int 0..100), `body_preview` (None unless `details` were expanded),
@@ -132,7 +136,7 @@ def planner_envelope(raw: dict[str, Any]) -> dict[str, Any]:
         "status": normalise_planner_status(raw.get("percentComplete")),
         "due_date": flatten_due_datetime(raw.get("dueDateTime")),
         "assignees": assignees,
-        "web_url": _build_planner_web_url(raw.get("id")),
+        "web_url": _build_planner_web_url(raw.get("id"), tenant_id),
         "source": "planner",
         "etag": raw.get("@odata.etag"),
         # Planner-specific extras
@@ -146,15 +150,22 @@ def planner_envelope(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_planner_web_url(task_id: Any) -> str | None:
-    """Planner web URL pattern: tasks.office.com/{tenant}/Home/Task/{id}.
+def _build_planner_web_url(task_id: Any, tenant_id: str | None) -> str | None:
+    """Planner deep-link pattern: tasks.office.com/{tenant_id}/Home/Task/{id}.
 
-    The tenant segment varies per install — we'd need it threaded
-    through from auth. For now return None and let the agent open
-    Planner manually; a follow-up can wire the tenant in.
+    Tools resolve `tenant_id` once from the access token's JWT `tid`
+    claim (no extra `/me` round-trip needed) and pass it here. When
+    `tenant_id` is None or `task_id` isn't a string, return None so
+    the envelope's contract holds.
     """
-    del task_id
-    return None
+    if not isinstance(task_id, str) or not task_id:
+        return None
+    if not tenant_id:
+        return None
+    # Imported here to keep the shape module's import surface narrow.
+    from microsoft_tasks_mcp.tools._common import planner_web_url
+
+    return planner_web_url(tenant_id, task_id)
 
 
 def _extract_applied_categories(raw: Any) -> list[str]:

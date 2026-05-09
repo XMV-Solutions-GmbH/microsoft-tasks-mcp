@@ -26,7 +26,11 @@ from typing import Any
 import httpx
 
 from microsoft_tasks_mcp.auth import get_token
-from microsoft_tasks_mcp.tools._common import GRAPH_BASE, auth_headers
+from microsoft_tasks_mcp.tools._common import (
+    GRAPH_BASE,
+    auth_headers,
+    tenant_id_from_token,
+)
 from microsoft_tasks_mcp.tools._shape import planner_envelope, todo_envelope
 
 
@@ -50,11 +54,13 @@ def assigned_to_me(
     per_source = max(1, limit // 2)
 
     token = get_token(profile)
+    tenant_id = tenant_id_from_token(token)
     client = http if http is not None else httpx.Client(timeout=30.0)
     try:
         planner_tasks = _fetch_planner(
             client=client,
             token=token,
+            tenant_id=tenant_id,
             include_completed=include_completed,
             limit=per_source,
         )
@@ -77,6 +83,7 @@ def _fetch_planner(
     *,
     client: httpx.Client,
     token: str,
+    tenant_id: str | None,
     include_completed: bool,
     limit: int,
 ) -> list[dict[str, Any]]:
@@ -97,7 +104,7 @@ def _fetch_planner(
             break
         if not isinstance(task, dict):
             continue
-        envelope = planner_envelope(task)
+        envelope = planner_envelope(task, tenant_id=tenant_id)
         if not include_completed and envelope["status"] == "completed":
             continue
         out.append(envelope)

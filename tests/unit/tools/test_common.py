@@ -13,8 +13,32 @@ keys here makes a regression visible the moment someone replaces
 
 from __future__ import annotations
 
+import base64
+import json
+
 from microsoft_tasks_mcp import __version__
-from microsoft_tasks_mcp.tools._common import GRAPH_BASE, USER_AGENT, auth_headers
+from microsoft_tasks_mcp.tools._common import (
+    GRAPH_BASE,
+    USER_AGENT,
+    auth_headers,
+    planner_web_url,
+    tenant_id_from_token,
+)
+
+
+def _make_jwt(payload: dict[str, object]) -> str:
+    """Build a fake unsigned JWT with the given payload — header +
+    signature parts are placeholder garbage, just enough to pass
+    `tenant_id_from_token`'s shape check."""
+
+    def b64(d: dict[str, object] | bytes) -> str:
+        if isinstance(d, dict):
+            d = json.dumps(d).encode()
+        return base64.urlsafe_b64encode(d).rstrip(b"=").decode()
+
+    header = b64({"alg": "RS256", "typ": "JWT"})
+    body = b64(payload)
+    return f"{header}.{body}.signaturePlaceholder"
 
 
 def test_graph_base_url_is_v1() -> None:
@@ -47,3 +71,67 @@ def test_auth_headers_only_authoritative_keys() -> None:
     shared helper."""
     headers = auth_headers("AT")
     assert set(headers.keys()) == {"Authorization", "User-Agent"}
+
+
+# ---------------------------------------------------------------------
+# tenant_id_from_token
+# ---------------------------------------------------------------------
+
+
+def test_tenant_id_extracted_from_jwt_tid_claim() -> None:
+    token = _make_jwt({"tid": "11111111-2222-3333-4444-555555555555", "upn": "x@y"})
+    assert tenant_id_from_token(token) == "11111111-2222-3333-4444-555555555555"
+
+
+def test_tenant_id_returns_none_when_tid_missing() -> None:
+    token = _make_jwt({"upn": "x@y"})
+    assert tenant_id_from_token(token) is None
+
+
+def test_tenant_id_returns_none_when_tid_not_a_string() -> None:
+    token = _make_jwt({"tid": 12345})
+    assert tenant_id_from_token(token) is None
+
+
+def test_tenant_id_returns_none_when_tid_empty() -> None:
+    token = _make_jwt({"tid": ""})
+    assert tenant_id_from_token(token) is None
+
+
+def test_tenant_id_returns_none_for_garbage_token() -> None:
+    assert tenant_id_from_token("not-a-jwt") is None
+
+
+def test_tenant_id_returns_none_for_two_part_token() -> None:
+    """JWT must have exactly three dot-separated parts."""
+    assert tenant_id_from_token("aa.bb") is None
+
+
+def test_tenant_id_returns_none_when_payload_not_object() -> None:
+    """Payload that decodes to a list (not a dict) is malformed."""
+    payload = base64.urlsafe_b64encode(b"[1,2,3]").rstrip(b"=").decode()
+    token = f"header.{payload}.sig"
+    assert tenant_id_from_token(token) is None
+
+
+def test_tenant_id_returns_none_when_payload_not_json() -> None:
+    """Payload that's not valid JSON must not raise."""
+    payload = base64.urlsafe_b64encode(b"not json").rstrip(b"=").decode()
+    token = f"header.{payload}.sig"
+    assert tenant_id_from_token(token) is None
+
+
+# ---------------------------------------------------------------------
+# planner_web_url
+# ---------------------------------------------------------------------
+
+
+def test_planner_web_url_canonical_format() -> None:
+    url = planner_web_url(
+        "11111111-2222-3333-4444-555555555555",
+        "task-abc-123",
+    )
+    assert (
+        url
+        == "https://tasks.office.com/11111111-2222-3333-4444-555555555555/Home/Task/task-abc-123"
+    )

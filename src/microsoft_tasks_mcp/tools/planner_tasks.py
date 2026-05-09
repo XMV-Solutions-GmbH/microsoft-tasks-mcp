@@ -20,7 +20,11 @@ from typing import Any
 import httpx
 
 from microsoft_tasks_mcp.auth import get_token
-from microsoft_tasks_mcp.tools._common import GRAPH_BASE, auth_headers
+from microsoft_tasks_mcp.tools._common import (
+    GRAPH_BASE,
+    auth_headers,
+    tenant_id_from_token,
+)
 from microsoft_tasks_mcp.tools._shape import planner_envelope
 
 _VALID_STATUS_FILTERS = frozenset({"all", "completed", "not_completed"})
@@ -50,6 +54,7 @@ def list_planner_tasks(
         )
 
     token = get_token(profile)
+    tenant_id = tenant_id_from_token(token)
     client = http if http is not None else httpx.Client(timeout=30.0)
     try:
         response = client.get(
@@ -62,6 +67,7 @@ def list_planner_tasks(
             bucket_id=bucket_id.strip() if bucket_id and bucket_id.strip() else None,
             status_filter=status_filter,
             limit=limit,
+            tenant_id=tenant_id,
         )
     finally:
         if http is None:
@@ -74,6 +80,7 @@ def _extract_tasks(
     bucket_id: str | None,
     status_filter: str,
     limit: int,
+    tenant_id: str | None,
 ) -> list[dict[str, Any]]:
     raw = payload.get("value", [])
     if not isinstance(raw, list):
@@ -86,7 +93,7 @@ def _extract_tasks(
             continue
         if bucket_id is not None and task.get("bucketId") != bucket_id:
             continue
-        envelope = planner_envelope(task)
+        envelope = planner_envelope(task, tenant_id=tenant_id)
         if status_filter == "completed" and envelope["status"] != "completed":
             continue
         if status_filter == "not_completed" and envelope["status"] != "not_completed":
