@@ -145,6 +145,56 @@ Agent:  [calls planner_task_get(task_id="...", include_details=True)]
 
 Every action above is a **read** — no Planner/To-Do state was modified. The server's default install requests no write scopes; the consent screen reads "this app can read your tasks", not "modify". Write tools (create / update / complete / delete) land in v0.2 behind the explicit `TASKS_ALLOW_WRITES=true` env flag.
 
+## Use case — drafting follow-up tasks after a meeting
+
+A second dialogue showing v0.2 write tools (`TASKS_ALLOW_WRITES=true`). Note that the agent only ever creates tasks; it never marks anyone else's task done.
+
+```text
+You:    I just got out of the steering meeting with the ISMS team. Three follow-ups
+        — please add them to the Compliance Planner plan, Todo bucket. Owner:
+        me. Due Friday. The items are:
+        1. Update the Statement of Applicability for control A.5.1
+        2. Schedule the Q3 surveillance audit pre-call with the auditor
+        3. Send the policy-review reminder to the legal team
+
+Agent:  [calls planner_plans()]
+        [calls planner_buckets("Compliance-plan-id") to find the Todo bucket]
+        [calls planner_task_create x3, each with plan_id + bucket_id + title +
+         due_date + assignees=["d.koller@xmv.de"]]
+
+        Created three Planner tasks in Compliance / Todo, all due Friday:
+
+        - "Update SoA for A.5.1" — task id task-abc1
+          → https://tasks.office.com/<tenant>/Home/Task/task-abc1
+        - "Schedule Q3 surveillance pre-call with auditor" — task-abc2
+          → https://tasks.office.com/<tenant>/Home/Task/task-abc2
+        - "Send policy-review reminder to legal" — task-abc3
+          → https://tasks.office.com/<tenant>/Home/Task/task-abc3
+
+        All three are now in this MCP profile's registry, so I can update or
+        complete them later if you ask. Want me to also drop a "review the SoA
+        edits" reminder on your personal To Do list?
+
+You:    Yes please, due Thursday.
+
+Agent:  [calls todo_task_create(list_id=<default>, title=..., due_date="2026-08-13",
+         importance="high")]
+
+        Added to your default Tasks list:
+        - "Review the SoA edits before sending" — due Thursday, importance high
+
+You:    Mark task-abc3 as complete — I already pinged legal directly.
+
+Agent:  [calls planner_task_complete("task-abc3")]
+
+        Marked "Send policy-review reminder to legal" complete. The task was in
+        my registry (I created it earlier this conversation), so the action went
+        through. If you'd asked me to mark a task you or a colleague had created,
+        I would have refused — only my own tasks are eligible.
+```
+
+The last exchange shows the **load-bearing safety guarantee** in action. The per-profile registry on disk (`~/.cache/mcp-server-microsoft-tasks/<profile>/tasks.json`) lists every task this MCP server created. `planner_task_update`, `_complete`, and `_delete` consult that registry *before* hitting Microsoft Graph and refuse with `NOT_OWNED_BY_PROFILE` if the task isn't there. ETag-based optimistic concurrency adds a second guard against silently clobbering external edits — see [`docs/app-concept.md`](docs/app-concept.md) § Conflict / safety semantics.
+
 ## v0.1 tool surface (read-only)
 
 | Tool | What it does |
