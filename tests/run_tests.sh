@@ -37,8 +37,11 @@ run_layer() {
     local layer="$1"
     local path="${SCRIPT_DIR}/${layer}"
     if [[ ! -d "${path}" ]]; then
-        echo "ERROR: layer directory not found: ${path}" >&2
-        return 1
+        # Empty layer dirs aren't tracked by git, so during bootstrap a
+        # layer can be genuinely absent. Treat as "no tests yet" rather
+        # than a fatal error.
+        echo "    (layer directory not found: tests/${layer} — empty layer, treating as ok)"
+        return 0
     fi
     local cov_args=()
     case "${MS_TASKS_COVERAGE:-auto}" in
