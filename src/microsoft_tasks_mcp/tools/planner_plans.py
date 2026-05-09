@@ -20,7 +20,7 @@ from typing import Any
 import httpx
 
 from microsoft_tasks_mcp.auth import get_token
-from microsoft_tasks_mcp.tools._common import GRAPH_BASE, auth_headers
+from microsoft_tasks_mcp.tools._common import GRAPH_BASE, auth_headers, graph_planner_base
 
 
 def list_planner_plans(
@@ -66,7 +66,7 @@ def _list_plans_for_group(
     limit: int,
 ) -> list[dict[str, Any]]:
     response = client.get(
-        f"{GRAPH_BASE}/groups/{group_id}/planner/plans",
+        f"{graph_planner_base()}/groups/{group_id}/planner/plans",
         headers=auth_headers(token),
         params={"$top": limit},
     )
@@ -110,7 +110,7 @@ def _list_plans_across_groups(
             continue
         try:
             response = client.get(
-                f"{GRAPH_BASE}/groups/{gid}/planner/plans",
+                f"{graph_planner_base()}/groups/{gid}/planner/plans",
                 headers=auth_headers(token),
                 params={"$top": limit - len(plans)},
             )

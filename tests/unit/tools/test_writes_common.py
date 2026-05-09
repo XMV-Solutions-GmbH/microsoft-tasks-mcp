@@ -15,6 +15,7 @@ from microsoft_tasks_mcp.tools._writes_common import (
     ExternallyModifiedError,
     NotOwnedByProfileError,
     require_owned_by_profile,
+    validate_planner_recurrence,
 )
 
 
@@ -57,3 +58,112 @@ def test_externally_modified_error_message_carries_graph_id() -> None:
     err = ExternallyModifiedError("g1")
     assert "EXTERNALLY_MODIFIED" in str(err)
     assert err.graph_id == "g1"
+
+
+# ---------------------------------------------------------------------
+# validate_planner_recurrence — shape + enum guards
+# ---------------------------------------------------------------------
+
+
+def _good_weekly() -> dict[str, object]:
+    return {
+        "schedule": {
+            "patternStartDateTime": "2026-05-09T08:00:00Z",
+            "pattern": {
+                "type": "weekly",
+                "interval": 1,
+                "daysOfWeek": ["monday"],
+                "firstDayOfWeek": "sunday",
+            },
+        },
+    }
+
+
+def test_validate_recurrence_accepts_a_well_formed_weekly_payload() -> None:
+    validate_planner_recurrence(_good_weekly())  # no exception
+
+
+def test_validate_recurrence_accepts_schedule_null_for_cancellation() -> None:
+    """Setting schedule to None is the documented Graph form to stop a series."""
+    validate_planner_recurrence({"schedule": None})  # no exception
+
+
+def test_validate_recurrence_rejects_non_dict_top_level() -> None:
+    with pytest.raises(ValueError, match="recurrence must be a dict"):
+        validate_planner_recurrence("weekly")  # type: ignore[arg-type]
+
+
+def test_validate_recurrence_requires_schedule_key() -> None:
+    with pytest.raises(ValueError, match="must have a 'schedule' key"):
+        validate_planner_recurrence({"foo": "bar"})
+
+
+def test_validate_recurrence_rejects_non_dict_schedule_when_not_null() -> None:
+    with pytest.raises(ValueError, match=r"schedule must be a dict or null"):
+        validate_planner_recurrence({"schedule": "weekly"})
+
+
+def test_validate_recurrence_requires_pattern_dict() -> None:
+    with pytest.raises(ValueError, match="pattern must be a dict"):
+        validate_planner_recurrence({"schedule": {"pattern": None}})
+
+
+def test_validate_recurrence_rejects_unknown_pattern_type() -> None:
+    rec = _good_weekly()
+    rec["schedule"]["pattern"]["type"] = "hourly"  # type: ignore[index]
+    with pytest.raises(ValueError, match=r"pattern\.type must be one of"):
+        validate_planner_recurrence(rec)
+
+
+def test_validate_recurrence_rejects_zero_or_negative_interval() -> None:
+    rec = _good_weekly()
+    rec["schedule"]["pattern"]["interval"] = 0  # type: ignore[index]
+    with pytest.raises(ValueError, match="interval must be a positive int"):
+        validate_planner_recurrence(rec)
+
+
+def test_validate_recurrence_rejects_non_int_interval() -> None:
+    rec = _good_weekly()
+    rec["schedule"]["pattern"]["interval"] = "1"  # type: ignore[index]
+    with pytest.raises(ValueError, match="interval must be a positive int"):
+        validate_planner_recurrence(rec)
+
+
+def test_validate_recurrence_rejects_invalid_days_of_week() -> None:
+    rec = _good_weekly()
+    rec["schedule"]["pattern"]["daysOfWeek"] = ["funday"]  # type: ignore[index]
+    with pytest.raises(ValueError, match="daysOfWeek contains invalid day"):
+        validate_planner_recurrence(rec)
+
+
+def test_validate_recurrence_rejects_non_list_days_of_week() -> None:
+    rec = _good_weekly()
+    rec["schedule"]["pattern"]["daysOfWeek"] = "monday"  # type: ignore[index]
+    with pytest.raises(ValueError, match="daysOfWeek must be a list of strings"):
+        validate_planner_recurrence(rec)
+
+
+def test_validate_recurrence_rejects_invalid_first_day_of_week() -> None:
+    rec = _good_weekly()
+    rec["schedule"]["pattern"]["firstDayOfWeek"] = "lunes"  # type: ignore[index]
+    with pytest.raises(ValueError, match="firstDayOfWeek must be one of"):
+        validate_planner_recurrence(rec)
+
+
+def test_validate_recurrence_rejects_invalid_index() -> None:
+    rec = _good_weekly()
+    rec["schedule"]["pattern"]["index"] = "fifth"  # type: ignore[index]
+    with pytest.raises(ValueError, match="index must be one of"):
+        validate_planner_recurrence(rec)
+
+
+def test_validate_recurrence_accepts_valid_index() -> None:
+    rec = _good_weekly()
+    rec["schedule"]["pattern"]["type"] = "relativeMonthly"  # type: ignore[index]
+    rec["schedule"]["pattern"]["index"] = "third"  # type: ignore[index]
+    validate_planner_recurrence(rec)  # no exception
+
+
+def test_validate_recurrence_accepts_daily_with_just_type_and_interval() -> None:
+    """Per Graph docs, daily only requires type + interval."""
+    validate_planner_recurrence({"schedule": {"pattern": {"type": "daily", "interval": 3}}})

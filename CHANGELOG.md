@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Tracked in [GitHub Issues](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues).
 
+### Added
+
+- **Planner recurrence (read + write), opt-in via `MS_TASKS_PLANNER_BETA=true`.** Microsoft Graph's Planner recurrence APIs (`plannerTaskRecurrence` + `plannerRecurrenceSchedule`) are `/beta`-only as of this release; setting `MS_TASKS_PLANNER_BETA=true` switches every Planner tool from `/v1.0/planner/...` to `/beta/planner/...`. With the flag on, `planner_task_create` and `planner_task_update` accept an optional `recurrence` argument (`{"schedule": {"pattern": ..., "patternStartDateTime": ...}}`) that's forwarded to Graph; the unified envelope surfaces a new `recurrence` key (schedule + series-tracking metadata) on read. Pattern enums (`type`, `daysOfWeek`, `firstDayOfWeek`, `index`) are validated locally before the HTTP call. To stop a series, pass `recurrence={"schedule": None}` (Graph rejects setting top-level `recurrence` to null on tasks that already have it). Closes [#35](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues/35).
+- **Helper `tools/_common.graph_planner_base()`** — returns `/v1.0` or `/beta` based on `MS_TASKS_PLANNER_BETA`. All Planner tool callers use it instead of the v1.0-hardcoded `GRAPH_BASE`.
+- **Helper `tools/_writes_common.validate_planner_recurrence`** — pre-HTTP validation of the `plannerTaskRecurrence` shape. Catches obvious enum mistakes locally; defers richer "type X requires fields Y" validation to Graph (whose error is more authoritative).
+
 ## [v0.3.0] — 2026-05-09
 
 UX-gap closures from v0.1/v0.2 plus a non-admin-tenant escape hatch.
