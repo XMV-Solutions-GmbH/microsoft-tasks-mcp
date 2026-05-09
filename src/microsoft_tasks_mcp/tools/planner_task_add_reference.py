@@ -65,6 +65,8 @@ def add_planner_task_reference(
         expected_source="planner",
     )
 
+    new_task_etag: str | None = None
+
     token = get_token(profile)
     tenant_id = tenant_id_from_token(token)
     client = http if http is not None else httpx.Client(timeout=30.0)
@@ -119,6 +121,11 @@ def add_planner_task_reference(
         )
         task_response.raise_for_status()
         envelope = planner_envelope(task_response.json(), tenant_id=tenant_id)
+        # Patching /details bumps the task's own ETag too — refresh
+        # the registry so a follow-up update / delete doesn't 409.
+        env_etag = envelope.get("etag")
+        if isinstance(env_etag, str):
+            new_task_etag = env_etag
 
         details_after = client.get(
             f"{graph_planner_base()}/planner/tasks/{task_id_s}/details",
@@ -131,6 +138,8 @@ def add_planner_task_reference(
         if http is None:
             client.close()
 
+    if new_task_etag is not None:
+        reg.update_etag(task_id_s, new_task_etag)
     return envelope
 
 
