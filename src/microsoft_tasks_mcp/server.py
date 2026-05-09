@@ -50,6 +50,7 @@ from microsoft_tasks_mcp.tools.tasks_assigned_to_me import (
     assigned_to_me as _do_tasks_assigned_to_me,
 )
 from microsoft_tasks_mcp.tools.tasks_search import search as _do_tasks_search
+from microsoft_tasks_mcp.tools.tasks_status import status as _do_tasks_status
 from microsoft_tasks_mcp.tools.todo_list_get import get_todo_list as _do_todo_list_get
 from microsoft_tasks_mcp.tools.todo_lists import list_todo_lists as _do_todo_lists
 from microsoft_tasks_mcp.tools.todo_task_get import get_todo_task as _do_todo_task_get
@@ -423,11 +424,35 @@ def register_read_tools(mcp_instance: FastMCP) -> None:
 
 
 def register_write_tools(mcp_instance: FastMCP) -> None:
-    """Register the write tools (v0.2, gated on `TASKS_ALLOW_WRITES=true`).
+    """Register the v0.2 write tools (gated on `TASKS_ALLOW_WRITES=true`).
 
-    Placeholder. Write tools are out of scope for v0.1.
+    Currently registers only `tasks_status` — the registry-inspection
+    tool. The mutating tools (`*_task_create` / `_update` / `_complete`
+    / `_delete`) land in subsequent v0.2 chunks.
     """
-    del mcp_instance  # nothing to register yet
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Inspect Microsoft Tasks Created by This Profile",
+            readOnlyHint=True,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+        description=(
+            "Return every task this MCP profile created via the v0.2 "
+            "write tools, with the last-known title, source "
+            "(`'todo'` / `'planner'`), list_or_plan_id, etag, and "
+            "creation timestamp. Used by the agent to remember its "
+            "own outstanding work — and the **load-bearing safety "
+            "guarantee** of v0.2: only tasks listed here can be "
+            "modified by `*_task_update`, `*_task_complete`, or "
+            "`*_task_delete`. Tasks created by humans or other "
+            "agents are not in this registry and are protected from "
+            "MCP-side modification. Read-only — does not hit Graph."
+        ),
+    )
+    def tasks_status() -> list[dict[str, Any]]:
+        return _do_tasks_status(profile=_get_profile())
 
 
 def _build_server() -> FastMCP:
