@@ -31,12 +31,17 @@ def _file_backend(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.skipif(not _harness_token_present(), reason=_SKIP_REASON)
 def test_tasks_assigned_to_me_returns_envelope_shape() -> None:
-    """Shape contract: list of unified envelopes, each tagged with
-    `source` ("todo" or "planner"). Empty is valid."""
-    out = assigned_to_me(profile=HARNESS_PROFILE, limit=20)
-    assert isinstance(out, list)
-    for task in out:
+    """Shape contract (v0.4): {"tasks": [...], "_skipped_profiles": [...]}.
+    Each task is a unified envelope tagged with `source` and `profile`.
+    Empty `tasks` is valid; `_skipped_profiles` should be empty since
+    the harness profile is well-formed."""
+    result = assigned_to_me(profile=HARNESS_PROFILE, limit=20)
+    assert isinstance(result, dict)
+    assert isinstance(result["tasks"], list)
+    assert result["_skipped_profiles"] == []
+    for task in result["tasks"]:
         assert task["source"] in {"todo", "planner"}
+        assert task["profile"] == HARNESS_PROFILE
         assert "id" in task and "title" in task
         assert task["status"] in {"completed", "not_completed", None}
 

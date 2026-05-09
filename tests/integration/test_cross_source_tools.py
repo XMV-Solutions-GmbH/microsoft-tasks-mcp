@@ -43,7 +43,9 @@ def test_tasks_assigned_to_me_registered(monkeypatch: pytest.MonkeyPatch) -> Non
     server = _build_fresh_server(monkeypatch)
     fn = _registered(server, "tasks_assigned_to_me")
     out = fn()
-    assert {t["source"] for t in out} == {"planner"}
+    # v0.4 — return shape is now {"tasks": [...], "_skipped_profiles": [...]}.
+    assert {t["source"] for t in out["tasks"]} == {"planner"}
+    assert out["_skipped_profiles"] == []
 
 
 @respx.mock
