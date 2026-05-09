@@ -82,8 +82,14 @@ def add_planner_task_reference(
 
         # Step 2: PATCH the references dict — merging one new entry.
         encoded = encode_reference_url(normalised_url)
+        # Graph requires @odata.type on PATCH-ed open-type entries. The
+        # docs example shows it bare ("microsoft.graph.externalReference")
+        # but Graph in practice accepts only the hash-prefixed form here,
+        # consistent with how plannerAssignment is sent in
+        # planner_task_create. Empirically validated against the harness
+        # tenant — the bare form returns 400.
         entry: dict[str, Any] = {
-            "@odata.type": "microsoft.graph.externalReference",
+            "@odata.type": "#microsoft.graph.externalReference",
         }
         if alias is not None:
             entry["alias"] = alias
