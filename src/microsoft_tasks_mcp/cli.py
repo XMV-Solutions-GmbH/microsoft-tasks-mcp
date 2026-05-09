@@ -23,7 +23,6 @@ process never blocks for human interaction.
 from __future__ import annotations
 
 import argparse
-import sys
 from collections.abc import Sequence
 
 from microsoft_tasks_mcp import __version__
@@ -89,17 +88,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         get_token_store().delete(args.profile)
         return 0
 
-    # No subcommand — would start the MCP server on stdio. The server
-    # skeleton lands with Issue #5; until then this path is a status
-    # message rather than a non-functional stdio server.
-    print(
-        f"mcp-server-microsoft-tasks {__version__} — pre-alpha.\n"
-        "The MCP server skeleton isn't wired up yet (Issue #5). The CLI\n"
-        "subcommands `login` and `logout` work today; run with `--help`\n"
-        "for usage. Track status at\n"
-        "https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues",
-        file=sys.stderr,
-    )
+    # No subcommand — start the MCP server on stdio.
+    from microsoft_tasks_mcp.server import run
+
+    run()
     return 0
 
 

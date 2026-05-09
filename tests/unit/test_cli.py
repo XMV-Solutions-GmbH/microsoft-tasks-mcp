@@ -74,14 +74,19 @@ def test_logout_clears_token_for_profile(monkeypatch: pytest.MonkeyPatch) -> Non
     assert deleted == ["harness"]
 
 
-def test_no_subcommand_prints_status(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Until Issue #5 lands the server skeleton, the no-subcommand path
-    must emit a clear pre-alpha status message rather than fail or
-    silently spin."""
+def test_no_subcommand_starts_mcp_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No subcommand → the MCP server on stdio. Verify dispatch to
+    `microsoft_tasks_mcp.server.run` rather than asserting on stdio
+    behaviour (which would actually block the test)."""
+    called = {"run": False}
+
+    def fake_run() -> None:
+        called["run"] = True
+
+    import microsoft_tasks_mcp.server as server_module
+
+    monkeypatch.setattr(server_module, "run", fake_run)
+
     rc = cli.main([])
     assert rc == 0
-    err = capsys.readouterr().err
-    assert "pre-alpha" in err
-    assert "Issue #5" in err
+    assert called["run"] is True
