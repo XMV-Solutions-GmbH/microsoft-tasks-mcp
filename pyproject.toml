@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mcp-server-microsoft-tasks"
-version = "0.3.0"
+version = "0.4.0"
 description = "MCP server for Microsoft Tasks (Planner + To Do, unified) — read-only by default, writes opt-in, never modifies tasks the agent didn't create."
 readme = "README.md"
 requires-python = ">=3.11"
