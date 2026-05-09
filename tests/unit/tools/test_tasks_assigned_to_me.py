@@ -211,6 +211,23 @@ def test_skips_individual_todo_list_403(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @respx.mock
+def test_skips_planner_half_when_no_planner_env_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MS_TASKS_NO_PLANNER=true: cross-source must not hit /me/planner/tasks."""
+    monkeypatch.setenv("MS_TASKS_NO_PLANNER", "true")
+    _patch_get_token(monkeypatch)
+    planner_route = respx.get(PLANNER_ME).respond(json={"value": []})
+    respx.get(TODO_LISTS).respond(json={"value": [{"id": "L1"}]})
+    respx.get(f"{TODO_LISTS}/L1/tasks").respond(
+        json={"value": [{"id": "t-todo", "title": "T", "status": "notStarted"}]}
+    )
+    out = assigned_to_me()
+    assert planner_route.call_count == 0
+    assert [t["source"] for t in out] == ["todo"]
+
+
+@respx.mock
 def test_per_source_split_respects_overall_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

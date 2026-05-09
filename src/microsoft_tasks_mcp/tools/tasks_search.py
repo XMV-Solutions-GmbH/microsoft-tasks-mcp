@@ -21,6 +21,7 @@ from typing import Any
 import httpx
 
 from microsoft_tasks_mcp.auth import get_token
+from microsoft_tasks_mcp.auth.flow import planner_disabled
 from microsoft_tasks_mcp.tools._common import (
     GRAPH_BASE,
     auth_headers,
@@ -57,11 +58,12 @@ def search(
     token = get_token(profile)
     tenant_id = tenant_id_from_token(token)
     client = http if http is not None else httpx.Client(timeout=30.0)
+    planner_off = planner_disabled()
     try:
         out: list[dict[str, Any]] = []
         if source in ("all", "todo"):
             out.extend(_search_todo(client=client, token=token, needle=needle, limit=limit))
-        if len(out) < limit and source in ("all", "planner"):
+        if len(out) < limit and source in ("all", "planner") and not planner_off:
             out.extend(
                 _search_planner(
                     client=client,

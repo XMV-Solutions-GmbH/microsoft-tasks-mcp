@@ -59,7 +59,8 @@ Issue body convention: `## Context`, `## Acceptance criteria` (checkbox list), `
 - **Tests**: `pytest` + `pytest-asyncio` + `respx` for HTTP boundary mocks; harness layer hits the real Microsoft Graph against a dedicated M365 sandbox.
 - **Lint/format**: `ruff` (replacing flake8 + black + isort), `mypy` strict.
 - **Build**: `uv` for lock + sync + build. Hatchling backend.
-- **Auth scopes (delegated)**: `Tasks.Read` (always), `Tasks.ReadWrite` (only when `TASKS_ALLOW_WRITES=true`), `Group.Read.All` (Planner — admin-consent), `User.Read`, `offline_access`.
+- **Auth scopes (delegated)**: `Tasks.Read` (always), `Tasks.ReadWrite` (only when `TASKS_ALLOW_WRITES=true`), `Group.Read.All` (Planner — admin-consent; dropped when `MS_TASKS_NO_PLANNER=true`), `User.Read`, `offline_access`.
+- **Env flags**: `TASKS_ALLOW_WRITES=true` (registers write tools + adds `Tasks.ReadWrite` scope); `MS_TASKS_NO_PLANNER=true` (skips Planner tool registration + drops `Group.Read.All` scope, for non-admin tenants); `TASKS_PROFILE=<name>` (per-tenant cache namespace; default `default`); `TASKS_CLIENT_ID` / `TASKS_TENANT_ID` (BYO Entra app override); `MS_TASKS_TOKEN_STORE=keyring|file|encrypted-file` (override token-store auto-pick); `MS_TASKS_TOKEN_PASSPHRASE` (required for encrypted-file backend).
 
 ### Project-specific overrides of the engineering baseline
 

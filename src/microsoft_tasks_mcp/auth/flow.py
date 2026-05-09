@@ -63,19 +63,15 @@ DEFAULT_AUTHORITY_TENANT = "organizations"
 # modify your tasks" — the default install is read-only. See
 # docs/app-concept.md § "Read-only by default" for the design discussion.
 ALLOW_WRITES_ENV = "TASKS_ALLOW_WRITES"
-_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 
-_BASE_SCOPES: tuple[str, ...] = (
-    # Read both To Do (per-user) and Planner (group-scoped) tasks.
-    "Tasks.Read",
-    # Group.Read.All is required for Planner: plans are tied to M365
-    # groups, and we need to enumerate the user's groups via /me/memberOf
-    # before we can even list their plans. Admin-consent in most tenants
-    # — XMV-tenant grant is tenant-wide.
-    "Group.Read.All",
-    "User.Read",
-    "offline_access",
-)
+# Env flag that opts the running MCP server out of Planner support
+# entirely. When truthy: Group.Read.All is dropped from the OAuth scope
+# request (so a non-admin tenant's user can complete sign-in without
+# needing tenant-admin consent), and the MCP server skips registering
+# any planner_* tools. Useful for users who only care about their
+# personal Microsoft To Do tasks.
+NO_PLANNER_ENV = "MS_TASKS_NO_PLANNER"
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
 def writes_enabled() -> bool:
@@ -89,32 +85,54 @@ def writes_enabled() -> bool:
     return os.environ.get(ALLOW_WRITES_ENV, "").strip().lower() in _TRUE_VALUES
 
 
+def planner_disabled() -> bool:
+    """True iff `MS_TASKS_NO_PLANNER` is set to a recognised truthy value.
+
+    When True: `Group.Read.All` is dropped from the OAuth scope request,
+    Planner tool registration is skipped, and the cross-source tools
+    (`tasks_assigned_to_me`, `tasks_search`) silently exclude the
+    Planner half. Lets non-admin users in admin-consent-strict tenants
+    use the To Do half without their tenant admin needing to grant
+    `Group.Read.All`.
+    """
+    return os.environ.get(NO_PLANNER_ENV, "").strip().lower() in _TRUE_VALUES
+
+
 def resolve_scopes() -> tuple[str, ...]:
     """Return the OAuth scopes to request at this moment.
 
-    Always includes `_BASE_SCOPES`. Appends `Tasks.ReadWrite` only when
-    `writes_enabled()` is true — this is the load-bearing property that
-    keeps the default install's consent screen read-only while permitting
-    an explicit per-deployment opt-in. Resolved at call time, not at
-    module load, so test-time `monkeypatch.setenv` flips behaviour
-    without re-importing.
+    Composition rules (resolved at call time, not module load):
+
+    - Always include `Tasks.Read`, `User.Read`, `offline_access`.
+    - Include `Group.Read.All` unless `MS_TASKS_NO_PLANNER` is truthy.
+    - Append `Tasks.ReadWrite` when `TASKS_ALLOW_WRITES` is truthy.
+
+    The default install consent screen reads "this app can read your
+    tasks" + "read all groups". Setting MS_TASKS_NO_PLANNER drops the
+    groups scope; setting TASKS_ALLOW_WRITES adds the writes scope. Both
+    flags are independent.
     """
+    scopes: list[str] = ["Tasks.Read"]
     if writes_enabled():
-        # Order matches outlook-mcp's pattern: append the optional scope
-        # last so the read-only base remains stable.
-        return (
-            "Tasks.Read",
-            "Tasks.ReadWrite",
-            "Group.Read.All",
-            "User.Read",
-            "offline_access",
-        )
-    return _BASE_SCOPES
+        scopes.append("Tasks.ReadWrite")
+    if not planner_disabled():
+        scopes.append("Group.Read.All")
+    scopes.extend(["User.Read", "offline_access"])
+    return tuple(scopes)
 
 
 # Backwards-compat alias so callers who still import DEFAULT_SCOPES at
-# module load continue to work — they get the un-flagged default.
-DEFAULT_SCOPES = _BASE_SCOPES
+# module load continue to work — they get the read-only-with-Planner
+# default. Tests that need env-aware shape should call resolve_scopes()
+# directly.
+DEFAULT_SCOPES: tuple[str, ...] = (
+    "Tasks.Read",
+    "Group.Read.All",
+    "User.Read",
+    "offline_access",
+)
+# Internal alias kept for symmetry with old test references.
+_BASE_SCOPES = DEFAULT_SCOPES
 
 DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
 
@@ -125,12 +143,14 @@ __all__ = [
     "DEFAULT_CLIENT_ID",
     "DEFAULT_SCOPES",
     "DEVICE_CODE_GRANT_TYPE",
+    "NO_PLANNER_ENV",
     "AuthorizationDeniedError",
     "CachedToken",
     "DeviceCodeChallenge",
     "DeviceCodeError",
     "DeviceCodeExpiredError",
     "RefreshTokenInvalidError",
+    "planner_disabled",
     "poll_for_token",
     "refresh_access_token",
     "request_device_code",

@@ -155,3 +155,32 @@ def test_swallows_planner_403_in_search(monkeypatch: pytest.MonkeyPatch) -> None
     respx.get(PLANNER_ME).respond(403, json={"error": "no"})
     out = search("match")
     assert [t["id"] for t in out] == ["t1"]
+
+
+@respx.mock
+def test_skips_planner_when_no_planner_env_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MS_TASKS_NO_PLANNER=true: search('all') must not hit /me/planner/tasks."""
+    monkeypatch.setenv("MS_TASKS_NO_PLANNER", "true")
+    _patch_get_token(monkeypatch)
+    planner_route = respx.get(PLANNER_ME).respond(json={"value": []})
+    respx.get(TODO_LISTS).respond(json={"value": [{"id": "L1"}]})
+    respx.get(f"{TODO_LISTS}/L1/tasks").respond(json={"value": [{"id": "t1", "title": "match"}]})
+    out = search("match", source="all")
+    assert planner_route.call_count == 0
+    assert [t["id"] for t in out] == ["t1"]
+
+
+@respx.mock
+def test_source_planner_with_no_planner_returns_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Even when source='planner' is explicit, MS_TASKS_NO_PLANNER wins
+    — return empty without hitting Graph."""
+    monkeypatch.setenv("MS_TASKS_NO_PLANNER", "true")
+    _patch_get_token(monkeypatch)
+    planner_route = respx.get(PLANNER_ME).respond(json={"value": []})
+    out = search("match", source="planner")
+    assert planner_route.call_count == 0
+    assert out == []
