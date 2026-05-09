@@ -60,6 +60,20 @@ def test_writes_enabled_does_not_break_login_registration(
     assert "tasks_login_status" in names
 
 
+def test_tasks_status_only_with_writes_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TASKS_ALLOW_WRITES", raising=False)
+    server_module = _build_fresh_server(monkeypatch)
+    names_off = _registered_tool_names(server_module._build_server())
+    assert "tasks_status" not in names_off
+
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "true")
+    server_module = _build_fresh_server(monkeypatch)
+    names_on = _registered_tool_names(server_module._build_server())
+    assert "tasks_status" in names_on
+
+
 def test_get_profile_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TASKS_PROFILE", raising=False)
     from microsoft_tasks_mcp.server import _get_profile
