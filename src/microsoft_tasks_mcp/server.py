@@ -28,7 +28,11 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
-from microsoft_tasks_mcp.auth.flow import planner_disabled, writes_enabled
+from microsoft_tasks_mcp.auth.flow import (
+    TasksConsentNotConfiguredError,
+    planner_disabled,
+    validate_consent_config,
+)
 from microsoft_tasks_mcp.tools.login_begin import login_begin as _do_login_begin
 from microsoft_tasks_mcp.tools.login_status import login_status as _do_login_status
 from microsoft_tasks_mcp.tools.planner_buckets import (
@@ -820,7 +824,15 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
 
 
 def _build_server() -> FastMCP:
-    """Build and return a FastMCP server with the right tools registered."""
+    """Build and return a FastMCP server with the right tools registered.
+
+    Validates the consent env var (`TASKS_ALLOW_WRITES`) up-front via
+    `validate_consent_config()` — if unset or has a non-`true`/`false`
+    value, raises `TasksConsentNotConfiguredError` with a clear
+    onboarding-help message. The exception is allowed to propagate so
+    the operator sees it on stderr; no silent read-only fallback.
+    """
+    writes = validate_consent_config()
     log = logging.getLogger("microsoft-tasks-mcp")
     server = FastMCP("mcp-server-microsoft-tasks")
     register_login_tools(server)
@@ -833,20 +845,25 @@ def _build_server() -> FastMCP:
             "Group.Read.All NOT requested at sign-in. To Do tools "
             "remain available.",
         )
-    if writes_enabled():
+    if writes:
         register_write_tools(server)
         if not planner_disabled():
             register_planner_write_tools(server)
-    else:
-        log.info(
-            "TASKS_ALLOW_WRITES not set — read-only mode "
-            "(write tools not registered). "
-            "Set TASKS_ALLOW_WRITES=true to enable writes (v0.2+).",
-        )
     return server
 
 
-mcp: FastMCP = _build_server()
+# Build at module-import time so MCP-client launchers (uvx, etc.)
+# get the consent-validation error immediately on startup rather
+# than mid-protocol-handshake.
+try:
+    mcp: FastMCP = _build_server()
+except TasksConsentNotConfiguredError as err:
+    # Print the help text to stderr so MCP-client log windows show
+    # it verbatim — the message IS the onboarding doc. Then re-raise
+    # so the process exits non-zero.
+    sys.stderr.write(str(err) + "\n")
+    sys.stderr.flush()
+    raise
 
 
 def run() -> None:

@@ -72,9 +72,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Parse CLI arguments and dispatch to the right subcommand.
 
     Returns the process exit code.
+
+    For both `login` and the default server-start path, validates the
+    consent env var (`TASKS_ALLOW_WRITES`) up-front — if unset or has
+    a non-`true`/`false` value, prints the help text and exits 2.
+    The CLI `logout` subcommand skips this check because clearing a
+    cached token doesn't depend on the operator's write decision.
     """
+    import sys
+
+    from microsoft_tasks_mcp.auth.flow import (
+        TasksConsentNotConfiguredError,
+        validate_consent_config,
+    )
+
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    if args.command != "logout":
+        try:
+            validate_consent_config()
+        except TasksConsentNotConfiguredError as err:
+            sys.stderr.write(str(err) + "\n")
+            return 2
 
     if args.command == "login":
         from microsoft_tasks_mcp.auth import interactive_login
