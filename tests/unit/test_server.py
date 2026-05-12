@@ -29,7 +29,7 @@ def _registered_tool_names(mcp_instance) -> set[str]:  # type: ignore[no-untyped
 
 
 def test_login_tools_always_registered(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("TASKS_ALLOW_WRITES", raising=False)
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "false")
     server_module = _build_fresh_server(monkeypatch)
     names = _registered_tool_names(server_module._build_server())
     assert "tasks_login_begin" in names
@@ -39,7 +39,7 @@ def test_login_tools_always_registered(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_writes_disabled_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """No write tools registered by default. v0.1 has no read tools yet
     either, so the only registered names are the two login tools."""
-    monkeypatch.delenv("TASKS_ALLOW_WRITES", raising=False)
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "false")
     server_module = _build_fresh_server(monkeypatch)
     names = _registered_tool_names(server_module._build_server())
     # As soon as v0.1 read tools land, more names appear here — but no
@@ -63,7 +63,7 @@ def test_writes_enabled_does_not_break_login_registration(
 def test_tasks_status_only_with_writes_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("TASKS_ALLOW_WRITES", raising=False)
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "false")
     server_module = _build_fresh_server(monkeypatch)
     names_off = _registered_tool_names(server_module._build_server())
     assert "tasks_status" not in names_off
@@ -97,7 +97,7 @@ _TODO_READ_TOOLS = {"todo_lists", "todo_list_get", "todo_tasks", "todo_task_get"
 
 def test_planner_reads_registered_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MS_TASKS_NO_PLANNER", raising=False)
-    monkeypatch.delenv("TASKS_ALLOW_WRITES", raising=False)
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "false")
     names = _registered_tool_names(_build_fresh_server(monkeypatch)._build_server())
     assert _PLANNER_READ_TOOLS.issubset(names)
 
@@ -106,7 +106,7 @@ def test_planner_reads_skipped_when_no_planner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("MS_TASKS_NO_PLANNER", "true")
-    monkeypatch.delenv("TASKS_ALLOW_WRITES", raising=False)
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "false")
     names = _registered_tool_names(_build_fresh_server(monkeypatch)._build_server())
     assert names.isdisjoint(_PLANNER_READ_TOOLS)
     # To Do reads still present
@@ -159,3 +159,67 @@ def test_server_name(monkeypatch: pytest.MonkeyPatch) -> None:
     server_module = _build_fresh_server(monkeypatch)
     server = server_module._build_server()
     assert server.name == "mcp-server-microsoft-tasks"
+
+
+# ---------------------------------------------------------------------
+# v0.5 strict consent gate
+# ---------------------------------------------------------------------
+
+
+def test_build_server_refuses_when_consent_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_build_server raises TasksConsentNotConfiguredError when TASKS_ALLOW_WRITES unset.
+
+    The reload itself raises (because the module-top-level
+    `mcp = _build_server()` line fires during reload). That's the
+    contract: an MCP-client launching the server with unset env sees
+    an immediate startup error, not a deferred mid-protocol surprise.
+    """
+    monkeypatch.delenv("TASKS_ALLOW_WRITES", raising=False)
+    import importlib
+
+    import microsoft_tasks_mcp.server as server_module
+    from microsoft_tasks_mcp.auth.flow import TasksConsentNotConfiguredError
+
+    with pytest.raises(TasksConsentNotConfiguredError, match="not set"):
+        importlib.reload(server_module)
+    # Re-restore a valid module state for subsequent tests by re-loading
+    # with a safe value (the conftest's setdefault gave us "false" in
+    # the parent process, but reload bypasses that).
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "false")
+    importlib.reload(server_module)
+
+
+def test_build_server_refuses_on_legacy_truthy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v0.4 legacy `TASKS_ALLOW_WRITES=yes` is rejected — must be explicit true/false."""
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "yes")
+    import importlib
+
+    import microsoft_tasks_mcp.server as server_module
+    from microsoft_tasks_mcp.auth.flow import TasksConsentNotConfiguredError
+
+    with pytest.raises(TasksConsentNotConfiguredError, match="TASKS_ALLOW_WRITES"):
+        importlib.reload(server_module)
+    # Restore for subsequent tests.
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "false")
+    importlib.reload(server_module)
+
+
+def test_build_server_consent_false_works(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit TASKS_ALLOW_WRITES=false → server builds in read-only mode."""
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "false")
+    server_module = _build_fresh_server(monkeypatch)
+    server = server_module._build_server()
+    names = _registered_tool_names(server)
+    # Read-mode: login + read tools but no writes
+    assert "tasks_login_begin" in names
+    assert not any(n.endswith("_create") for n in names)
+
+
+def test_build_server_consent_true_registers_writes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit TASKS_ALLOW_WRITES=true → write tools registered."""
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "true")
+    server_module = _build_fresh_server(monkeypatch)
+    server = server_module._build_server()
+    names = _registered_tool_names(server)
+    assert "todo_task_create" in names
+    assert "planner_task_create" in names  # default-on Planner

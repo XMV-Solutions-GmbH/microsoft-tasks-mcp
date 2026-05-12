@@ -58,44 +58,122 @@ DEFAULT_CLIENT_ID = "0faf4ede-b330-4034-a49f-cbb47eac0ccd"
 DEFAULT_AUTHORITY_TENANT = "organizations"
 
 # Env var that opts the running MCP server into requesting Tasks.ReadWrite
-# at OAuth time (and registering the write tools as MCP tools). When
-# unset / falsy, the consent screen does NOT include "this app can
-# modify your tasks" — the default install is read-only. See
-# docs/app-concept.md § "Read-only by default" for the design discussion.
+# at OAuth time (and registering the write tools as MCP tools). v0.5
+# made this strict — must be exactly `"true"` or `"false"`; unset /
+# empty / legacy truthy (`1`/`yes`/`on`) all raise
+# `TasksConsentNotConfiguredError` at startup. Rationale: operators
+# silently landing in read-only mode without realising writes are a
+# separately-opt-in feature was the dominant onboarding failure mode
+# in v0.4.x.
 ALLOW_WRITES_ENV = "TASKS_ALLOW_WRITES"
+_STRICT_TRUE = "true"
+_STRICT_FALSE = "false"
 
 # Env flag that opts the running MCP server out of Planner support
 # entirely. When truthy: Group.Read.All is dropped from the OAuth scope
 # request (so a non-admin tenant's user can complete sign-in without
 # needing tenant-admin consent), and the MCP server skips registering
 # any planner_* tools. Useful for users who only care about their
-# personal Microsoft To Do tasks.
+# personal Microsoft To Do tasks. v0.5 left this lenient (truthy /
+# unset-as-false) because it's a feature-disable toggle, not a
+# compliance gate — the default behaviour (Planner enabled) is the
+# most-features behaviour.
 NO_PLANNER_ENV = "MS_TASKS_NO_PLANNER"
-_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+_LENIENT_TRUTHY = frozenset({"1", "true", "yes", "on"})
+_TRUE_VALUES = _LENIENT_TRUTHY  # legacy alias for tests
+
+
+class TasksConsentNotConfiguredError(RuntimeError):
+    """Raised at server-build / CLI-login time when `TASKS_ALLOW_WRITES`
+    is unset or has a non-`true`/`false` value.
+
+    The exception message is the user-facing onboarding hint —
+    callers re-raise without wrapping so the operator sees it
+    verbatim on stderr.
+    """
+
+
+def _strict_bool_env(name: str) -> bool:
+    """Read `name` from the environment and parse strictly.
+
+    Returns `True` for "true", `False` for "false" (case-insensitive,
+    leading/trailing whitespace ignored). Raises
+    `TasksConsentNotConfiguredError` with the documented onboarding-
+    help message for anything else, including unset / empty.
+    """
+    raw = os.environ.get(name)
+    if raw is not None:
+        normalised = raw.strip().lower()
+        if normalised == _STRICT_TRUE:
+            return True
+        if normalised == _STRICT_FALSE:
+            return False
+    raise TasksConsentNotConfiguredError(_consent_help_text(name, raw))
+
+
+def _consent_help_text(name: str, raw: str | None) -> str:
+    """Format the onboarding-help message for an unset / invalid
+    consent env var."""
+    got = "(not set)" if raw is None else f"{raw!r}"
+    return (
+        f"ERROR: mcp-server-microsoft-tasks requires an explicit "
+        f"{ALLOW_WRITES_ENV} decision (got {got}).\n\n"
+        f"This server can create / update / complete / delete tasks "
+        f"in Microsoft Planner and Microsoft To Do on the signed-in "
+        f"user's behalf (opt-in) or operate in read-only mode. There "
+        f"is no implicit default — the operator must consciously "
+        f"decide.\n\n"
+        f"Set in your MCP client config (.mcp.json env section):\n\n"
+        f'  "{ALLOW_WRITES_ENV}": "true"    — enable task create / '
+        f"update / complete / delete tools\n"
+        f'  "{ALLOW_WRITES_ENV}": "false"   — read-only (no write tools)\n\n'
+        f'With "false", the OAuth consent screen requests only '
+        f'`Tasks.Read`. With "true", it requests `Tasks.ReadWrite` '
+        f"instead (subsumes Read). The decision flows through to both "
+        f"the tool surface AND the consent prompt.\n\n"
+        f"See README §Authentication for the design rationale.\n\n"
+        f"The Planner toggle (`MS_TASKS_NO_PLANNER`) and recurrence "
+        f"toggle (`MS_TASKS_PLANNER_BETA`) remain lenient (set to a "
+        f"truthy value to enable; unset = default off / on respectively)."
+    )
+
+
+def validate_consent_config() -> bool:
+    """Validate the consent env var at startup.
+
+    Returns `writes_enabled` (True/False). Raises
+    `TasksConsentNotConfiguredError` with a clear, actionable error
+    message if `TASKS_ALLOW_WRITES` is unset or has a non-`true`/
+    `false` value.
+    """
+    return _strict_bool_env(ALLOW_WRITES_ENV)
 
 
 def writes_enabled() -> bool:
-    """True iff `TASKS_ALLOW_WRITES` is set to a recognised truthy value.
+    """True iff `TASKS_ALLOW_WRITES` is set to exactly `"true"`.
 
-    Default (unset / empty / anything else): writes are NOT enabled. The
-    OAuth scope request omits Tasks.ReadWrite; the consent screen does
-    not mention "modify your tasks"; and the MCP server does not register
-    the write tools (gated by the same flag in server.py).
+    Strict parser since v0.5 — raises
+    `TasksConsentNotConfiguredError` if the env var is unset, empty,
+    or has a value other than `true` or `false`. There is no implicit
+    default; the operator must consciously decide. See
+    [#37 in outlook-mcp](https://github.com/XMV-Solutions-GmbH/outlook-mcp/issues/37)
+    for the user-side rationale of the same pattern.
     """
-    return os.environ.get(ALLOW_WRITES_ENV, "").strip().lower() in _TRUE_VALUES
+    return validate_consent_config()
 
 
 def planner_disabled() -> bool:
-    """True iff `MS_TASKS_NO_PLANNER` is set to a recognised truthy value.
+    """True iff `MS_TASKS_NO_PLANNER` is set to a recognised truthy
+    value (`"1"`, `"true"`, `"yes"`, `"on"`; case-insensitive).
 
-    When True: `Group.Read.All` is dropped from the OAuth scope request,
-    Planner tool registration is skipped, and the cross-source tools
-    (`tasks_assigned_to_me`, `tasks_search`) silently exclude the
-    Planner half. Lets non-admin users in admin-consent-strict tenants
-    use the To Do half without their tenant admin needing to grant
-    `Group.Read.All`.
+    Stays **lenient** in v0.5 because this is a feature-disable
+    toggle, not a compliance gate — the default behaviour (Planner
+    enabled) is the most-features behaviour, not a "did the operator
+    consciously decide" question. Setting it to truthy drops
+    `Group.Read.All` from the OAuth scope request and skips Planner
+    tool registration.
     """
-    return os.environ.get(NO_PLANNER_ENV, "").strip().lower() in _TRUE_VALUES
+    return os.environ.get(NO_PLANNER_ENV, "").strip().lower() in _LENIENT_TRUTHY
 
 
 def resolve_scopes() -> tuple[str, ...]:
@@ -103,18 +181,18 @@ def resolve_scopes() -> tuple[str, ...]:
 
     Composition rules (resolved at call time, not module load):
 
-    - Always include `Tasks.Read`, `User.Read`, `offline_access`.
+    - Includes either `Tasks.Read` (writes off) OR `Tasks.ReadWrite`
+      (writes on). `Tasks.ReadWrite` subsumes `Tasks.Read`, so we
+      replace rather than append — the consent screen on writes-mode
+      shows only one tasks line, not two.
     - Include `Group.Read.All` unless `MS_TASKS_NO_PLANNER` is truthy.
-    - Append `Tasks.ReadWrite` when `TASKS_ALLOW_WRITES` is truthy.
+    - Always include `User.Read` and `offline_access`.
 
-    The default install consent screen reads "this app can read your
-    tasks" + "read all groups". Setting MS_TASKS_NO_PLANNER drops the
-    groups scope; setting TASKS_ALLOW_WRITES adds the writes scope. Both
-    flags are independent.
+    Raises `TasksConsentNotConfiguredError` if `TASKS_ALLOW_WRITES`
+    is not configured strictly.
     """
-    scopes: list[str] = ["Tasks.Read"]
-    if writes_enabled():
-        scopes.append("Tasks.ReadWrite")
+    writes = validate_consent_config()
+    scopes: list[str] = ["Tasks.ReadWrite"] if writes else ["Tasks.Read"]
     if not planner_disabled():
         scopes.append("Group.Read.All")
     scopes.extend(["User.Read", "offline_access"])
@@ -150,11 +228,13 @@ __all__ = [
     "DeviceCodeError",
     "DeviceCodeExpiredError",
     "RefreshTokenInvalidError",
+    "TasksConsentNotConfiguredError",
     "planner_disabled",
     "poll_for_token",
     "refresh_access_token",
     "request_device_code",
     "resolve_scopes",
+    "validate_consent_config",
     "writes_enabled",
 ]
 

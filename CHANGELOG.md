@@ -10,6 +10,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Tracked in [GitHub Issues](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues).
 
+## [v0.5.0] — 2026-05-12
+
+**Breaking change** to the consent-env-var contract — same pattern as `outlook-mcp` v0.4.0 (issue #37 in that repo) and `sharepoint-mcp` v0.5.0. Operators upgrading from v0.4.x must update their `.mcp.json` to set `TASKS_ALLOW_WRITES` to exactly `"true"` or `"false"`; legacy truthy values (`1`, `yes`, `on`) and unset / empty are now rejected at startup. Plus the OAuth consent screen now reflects the operator's actual decision — with `TASKS_ALLOW_WRITES=false` the prompt requests `Tasks.Read` only; with `=true` it requests `Tasks.ReadWrite` (which subsumes Read) instead.
+
+### Changed (breaking)
+
+- **`TASKS_ALLOW_WRITES` must be set to exactly `"true"` or `"false"`** (case-insensitive, trimmed). Any other value — including unset / empty / legacy `1`/`yes`/`on` — causes the server (and the CLI `login` subcommand) to refuse to start with a formatted onboarding-help message printed to stderr. The motivation matches the outlook-mcp issue #37 user-side rationale: operators silently landing in read-only mode without realising writes were a separately-opt-in feature was the dominant onboarding failure mode in v0.4.x.
+- **OAuth scopes now respect the consent decision and replace, don't append.** With `TASKS_ALLOW_WRITES=false`, `resolve_scopes()` requests `Tasks.Read`. With `=true`, `Tasks.ReadWrite` REPLACES `Tasks.Read` (ReadWrite subsumes Read; the consent screen now shows one tasks line, not two). Previously the OAuth request appended `Tasks.ReadWrite` to the existing `Tasks.Read` whenever writes were enabled — which displayed two adjacent consent lines and was inconsistent with how the read variant gets used.
+- **Server start is no longer silently read-only** when consent is unset. Previously the server fell through to read-only mode with an INFO log; operators commonly missed the log and assumed writes were broken. The new error message is itself the documentation.
+
+### Unchanged on purpose
+
+- **`MS_TASKS_NO_PLANNER` remains lenient** (truthy / unset-as-false). This is a feature-disable toggle, not a compliance gate — the default behaviour (Planner enabled) is the most-features behaviour. Forcing operators to consciously decide between Planner-on and Planner-off would be over-pedantic.
+- **`MS_TASKS_PLANNER_BETA` remains lenient** for the same reason — opt-in to /beta endpoints is by definition advanced-mode.
+
+### Added
+
+- **`microsoft_tasks_mcp.auth.flow.TasksConsentNotConfiguredError`** — new exception class raised by the strict consent parser. Re-exported from `auth.flow.__all__` so downstream tooling can catch it.
+- **`microsoft_tasks_mcp.auth.flow.validate_consent_config()`** — returns `writes_enabled` (True/False) or raises. Single source of truth; called from `_build_server()` at module import and from `cli.main()` before the login flow.
+
+### Engineering
+
+- 421 unit tests (was 391; +30 new). Strict env-var parser, scope-replacement instead of append, server-build refusal, CLI gating.
+- New harness test file `tests/harness/test_consent_gate.py` — 7 end-to-end checks against the real harness profile (skips gracefully if no token cached).
+
+### Migration from v0.4.x
+
+Add the explicit decision to your `.mcp.json` env section:
+
+```jsonc
+{
+  "mcpServers": {
+    "microsoft-tasks": {
+      "command": "uvx",
+      "args": ["mcp-server-microsoft-tasks"],
+      "env": {
+        "TASKS_ALLOW_WRITES": "false"   // read-only (no create/update/complete/delete)
+        // or
+        // "TASKS_ALLOW_WRITES": "true"   // enables planner_task_create, todo_task_create, etc.
+        // MS_TASKS_NO_PLANNER and MS_TASKS_PLANNER_BETA stay lenient — set them only if needed.
+      }
+    }
+  }
+}
+```
+
+If you were already setting `TASKS_ALLOW_WRITES=true` in v0.4.x, no change is needed. If you relied on legacy `1`/`yes`/`on`, change to `true`.
+
+**OAuth re-consent:** the first time the server starts under v0.5 with `TASKS_ALLOW_WRITES=false`, the next login will request `Tasks.Read` only. Existing cached tokens from v0.4 keep working — Graph accepts the broader-scope token even when the client requests narrower scopes on the next refresh.
+
 ## [v0.4.0] — 2026-05-09
 
 Three new feature areas (recurrence, references, cross-tenant fan-out) plus an accepted RFC for change notifications. Two new env flags (`MS_TASKS_PLANNER_BETA` for recurrence opt-in; nothing else mandatory) and one breaking shape change on `tasks_assigned_to_me`.
