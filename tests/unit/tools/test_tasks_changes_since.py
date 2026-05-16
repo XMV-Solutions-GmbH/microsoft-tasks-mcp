@@ -105,9 +105,7 @@ def test_scope_key_sort_order_independent() -> None:
 
 
 def test_scope_key_different_scopes_differ() -> None:
-    assert _scope_key({"kind": "plan", "plan_id": "p1"}) != _scope_key(
-        {"kind": "assigned_to_me"}
-    )
+    assert _scope_key({"kind": "plan", "plan_id": "p1"}) != _scope_key({"kind": "assigned_to_me"})
 
 
 # ---------------------------------------------------------------------------
@@ -116,13 +114,9 @@ def test_scope_key_different_scopes_differ() -> None:
 
 
 @respx.mock
-def test_fresh_cursor_everything_added(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_fresh_cursor_everything_added(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _patch_get_token(monkeypatch)
-    respx.get(PLAN_URL).respond(
-        json={"value": [_task("t1"), _task("t2")]}
-    )
+    respx.get(PLAN_URL).respond(json={"value": [_task("t1"), _task("t2")]})
     result = changes_since(
         _plan_scope(),
         profile="default",
@@ -152,9 +146,7 @@ def test_subsequent_poll_no_changes_all_empty(
 
 
 @respx.mock
-def test_new_task_appears_as_added(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_new_task_appears_as_added(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _patch_get_token(monkeypatch)
 
     respx.get(PLAN_URL).respond(json={"value": [_task("t1")]})
@@ -174,14 +166,10 @@ def test_advanced_last_modified_appears_as_modified(
 ) -> None:
     _patch_get_token(monkeypatch)
 
-    respx.get(PLAN_URL).respond(
-        json={"value": [_task("t1", last_modified="2026-01-01T10:00:00Z")]}
-    )
+    respx.get(PLAN_URL).respond(json={"value": [_task("t1", last_modified="2026-01-01T10:00:00Z")]})
     changes_since(_plan_scope(), profile="default", _cursor_base_dir=tmp_path)
 
-    respx.get(PLAN_URL).respond(
-        json={"value": [_task("t1", last_modified="2026-01-02T10:00:00Z")]}
-    )
+    respx.get(PLAN_URL).respond(json={"value": [_task("t1", last_modified="2026-01-02T10:00:00Z")]})
     result = changes_since(_plan_scope(), profile="default", _cursor_base_dir=tmp_path)
 
     assert result["added"] == []
@@ -213,19 +201,13 @@ def test_task_disappears_from_response_is_removed(
 
 
 @respx.mock
-def test_last_modified_max_monotonic(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_last_modified_max_monotonic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _patch_get_token(monkeypatch)
 
-    respx.get(PLAN_URL).respond(
-        json={"value": [_task("t1", last_modified="2026-03-01T00:00:00Z")]}
-    )
+    respx.get(PLAN_URL).respond(json={"value": [_task("t1", last_modified="2026-03-01T00:00:00Z")]})
     changes_since(_plan_scope(), profile="default", _cursor_base_dir=tmp_path)
 
-    respx.get(PLAN_URL).respond(
-        json={"value": [_task("t1", last_modified="2026-01-01T00:00:00Z")]}
-    )
+    respx.get(PLAN_URL).respond(json={"value": [_task("t1", last_modified="2026-01-01T00:00:00Z")]})
     changes_since(_plan_scope(), profile="default", _cursor_base_dir=tmp_path)
 
     store = CursorStore("default", base_dir=tmp_path)
@@ -270,9 +252,7 @@ def test_two_scopes_have_independent_cursors(
 
 
 @respx.mock
-def test_assigned_to_me_scope_fresh_cursor(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_assigned_to_me_scope_fresh_cursor(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _patch_get_token(monkeypatch)
     respx.get(ASSIGNED_URL).respond(json={"value": [_task("ta1")]})
     result = changes_since(
@@ -372,14 +352,10 @@ def test_cursor_advanced_false_when_truly_nothing_changed(
 ) -> None:
     _patch_get_token(monkeypatch)
 
-    respx.get(PLAN_URL).respond(
-        json={"value": [_task("t1", last_modified="2026-05-01T00:00:00Z")]}
-    )
+    respx.get(PLAN_URL).respond(json={"value": [_task("t1", last_modified="2026-05-01T00:00:00Z")]})
     changes_since(_plan_scope(), profile="default", _cursor_base_dir=tmp_path)
 
-    respx.get(PLAN_URL).respond(
-        json={"value": [_task("t1", last_modified="2026-05-01T00:00:00Z")]}
-    )
+    respx.get(PLAN_URL).respond(json={"value": [_task("t1", last_modified="2026-05-01T00:00:00Z")]})
     result = changes_since(_plan_scope(), profile="default", _cursor_base_dir=tmp_path)
 
     assert result["cursor_advanced"] is False

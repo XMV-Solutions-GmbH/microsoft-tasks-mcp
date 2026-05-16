@@ -216,9 +216,7 @@ def changes_since(
     """
     kind = scope.get("kind")
     if kind not in _VALID_SCOPE_KINDS:
-        raise ValueError(
-            f"scope.kind must be one of {sorted(_VALID_SCOPE_KINDS)}, got {kind!r}"
-        )
+        raise ValueError(f"scope.kind must be one of {sorted(_VALID_SCOPE_KINDS)}, got {kind!r}")
     if max_results <= 0:
         raise ValueError(f"max_results must be positive, got {max_results}")
 
@@ -298,11 +296,7 @@ def _compute_diff(
             added.append(envelope)
         elif task_id not in seen_ids:
             added.append(envelope)
-        elif (
-            last_modified_max is not None
-            and isinstance(lm, str)
-            and lm > last_modified_max
-        ):
+        elif last_modified_max is not None and isinstance(lm, str) and lm > last_modified_max:
             modified.append(envelope)
 
     removed: list[dict[str, Any]] = []

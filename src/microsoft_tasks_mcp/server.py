@@ -488,16 +488,16 @@ def register_planner_read_tools(mcp_instance: FastMCP) -> None:
             "returns ``added``, ``modified``, ``removed`` envelopes "
             "plus ``cursor_advanced`` (bool). "
             "``scope`` controls which tasks are polled — pass one of: "
-            "``{\"kind\": \"plan\", \"plan_id\": \"...\"}`` (all tasks in a "
-            "plan), ``{\"kind\": \"assigned_to_me\"}`` (tasks assigned to "
-            "the signed-in user), or ``{\"kind\": \"registry\"}`` (only "
+            '``{"kind": "plan", "plan_id": "..."}`` (all tasks in a '
+            'plan), ``{"kind": "assigned_to_me"}`` (tasks assigned to '
+            'the signed-in user), or ``{"kind": "registry"}`` (only '
             "tasks this MCP profile created — one GET per registry id). "
             "Each scope is tracked independently via a sha256 cursor key. "
             "First call → everything returned as ``added``, cursor "
             "initialised. Subsequent calls return only tasks that "
             "appeared, changed (``lastModifiedDateTime`` advanced), or "
             "disappeared since the previous poll. ``removed`` entries "
-            "carry ``{\"id\": \"...\", \"last_known_title\": null}`` — "
+            'carry ``{"id": "...", "last_known_title": null}`` — '
             "the title is not available because the task is gone. "
             "Cursor file: "
             "``~/.cache/mcp-server-microsoft-tasks/<profile>/cursors.json``"
