@@ -207,8 +207,36 @@ The last exchange shows the **load-bearing safety guarantee** in action. The per
 | `planner_tasks`, `planner_task_get` | List / fetch Planner tasks. `include_details=True` on `_task_get` folds in description, checklist, references. |
 | `tasks_assigned_to_me` | Unified across To Do + Planner. Sorted by due date ascending. |
 | `tasks_search` | Cross-source substring search; `source="all"` / `"todo"` / `"planner"`. |
+| `tasks_changes_since` | Incremental Planner diff since last poll — returns `added` / `modified` / `removed` envelopes. See below. |
 
 Every tool returns a **unified task envelope** with `id`, `title`, `status`, `due_date`, `assignees`, `web_url`, `source`, `etag`, plus source-specific extras (`list_id` / `body_preview` / `categories` / `importance` / `reminder_date` for To Do; `plan_id` / `bucket_id` / `priority` / `percent_complete` / `applied_categories` for Planner). Agents can route follow-up calls correctly off the `source` tag without learning two response shapes.
+
+## Incremental polling with `tasks_changes_since`
+
+`tasks_changes_since(scope, max_results=200)` lets an agent detect what changed since it last looked — without re-processing every task on every poll.
+
+Pass a `scope` dict to control which tasks are polled:
+
+| Scope | What gets polled |
+|---|---|
+| `{"kind": "plan", "plan_id": "..."}` | All tasks in one Planner plan (`GET /planner/plans/{id}/tasks`). |
+| `{"kind": "assigned_to_me"}` | Tasks assigned to the signed-in user (`GET /me/planner/tasks`). |
+| `{"kind": "registry"}` | Only tasks this MCP profile created — one `GET /planner/tasks/{id}` per registry entry. |
+
+The tool returns:
+
+```json
+{
+  "added":    [<task envelope>, ...],
+  "modified": [<task envelope>, ...],
+  "removed":  [{"id": "...", "last_known_title": null}, ...],
+  "cursor_advanced": true
+}
+```
+
+On the **first call** for a scope, every visible task is returned as `added` and the cursor is initialised. On subsequent calls, only tasks that appeared, had their `lastModifiedDateTime` advance, or disappeared from the response are returned. Everything else comes back empty.
+
+The cursor file lives at `~/.cache/mcp-server-microsoft-tasks/<profile>/cursors.json` (mode 0o600) and is updated atomically on every call. Each scope is tracked independently (keyed by sha256 of the JSON-serialised scope). The `last_modified_max` watermark is monotonic — a temporarily stale Graph timestamp can never roll the cursor backwards.
 
 ## v0.2 — write tools, opt-in via `TASKS_ALLOW_WRITES=true`
 
