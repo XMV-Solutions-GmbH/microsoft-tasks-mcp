@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Tracked in [GitHub Issues](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues).
 
+### Added
+
+- **`tasks_changes_since(scope, max_results)`** — new MCP tool (closes #41). Polls Microsoft Graph for Planner tasks and diffs against an on-disk cursor, returning `{"added": [...], "modified": [...], "removed": [...], "cursor_advanced": bool}`. Three scope kinds: `{"kind": "plan", "plan_id": "..."}` (all tasks in one plan), `{"kind": "assigned_to_me"}` (tasks assigned to the signed-in user), `{"kind": "registry"}` (one GET per task id in the profile's task registry). Cursor file lives at `~/.cache/mcp-server-microsoft-tasks/<profile>/cursors.json` (mode 0o600), keyed by sha256 of the JSON-serialised scope. Writes are atomic (temp-file + rename). First call returns everything as `added`; subsequent calls return only what changed since the last poll. `last_modified_max` is monotonic — a stale Graph timestamp never rolls the cursor back.
+
 ## [v0.5.0] — 2026-05-12
 
 **Breaking change** to the consent-env-var contract — same pattern as `outlook-mcp` v0.4.0 (issue #37 in that repo) and `sharepoint-mcp` v0.5.0. Operators upgrading from v0.4.x must update their `.mcp.json` to set `TASKS_ALLOW_WRITES` to exactly `"true"` or `"false"`; legacy truthy values (`1`, `yes`, `on`) and unset / empty are now rejected at startup. Plus the OAuth consent screen now reflects the operator's actual decision — with `TASKS_ALLOW_WRITES=false` the prompt requests `Tasks.Read` only; with `=true` it requests `Tasks.ReadWrite` (which subsumes Read) instead.

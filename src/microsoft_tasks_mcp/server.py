@@ -71,6 +71,9 @@ from microsoft_tasks_mcp.tools.planner_tasks import (
 from microsoft_tasks_mcp.tools.tasks_assigned_to_me import (
     assigned_to_me as _do_tasks_assigned_to_me,
 )
+from microsoft_tasks_mcp.tools.tasks_changes_since import (
+    changes_since as _do_tasks_changes_since,
+)
 from microsoft_tasks_mcp.tools.tasks_search import search as _do_tasks_search
 from microsoft_tasks_mcp.tools.tasks_status import status as _do_tasks_status
 from microsoft_tasks_mcp.tools.todo_list_get import get_todo_list as _do_todo_list_get
@@ -470,6 +473,46 @@ def register_planner_read_tools(mcp_instance: FastMCP) -> None:
             task_id,
             include_details=include_details,
             profile=_get_profile(),
+        )
+
+    @mcp_instance.tool(
+        annotations=ToolAnnotations(
+            title="Poll Planner Tasks for Changes Since Last Check",
+            readOnlyHint=True,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+        description=(
+            "Incremental diff of Microsoft Planner tasks since the last "
+            "call. Polls Graph, compares against an on-disk cursor, and "
+            "returns ``added``, ``modified``, ``removed`` envelopes "
+            "plus ``cursor_advanced`` (bool). "
+            "``scope`` controls which tasks are polled — pass one of: "
+            "``{\"kind\": \"plan\", \"plan_id\": \"...\"}`` (all tasks in a "
+            "plan), ``{\"kind\": \"assigned_to_me\"}`` (tasks assigned to "
+            "the signed-in user), or ``{\"kind\": \"registry\"}`` (only "
+            "tasks this MCP profile created — one GET per registry id). "
+            "Each scope is tracked independently via a sha256 cursor key. "
+            "First call → everything returned as ``added``, cursor "
+            "initialised. Subsequent calls return only tasks that "
+            "appeared, changed (``lastModifiedDateTime`` advanced), or "
+            "disappeared since the previous poll. ``removed`` entries "
+            "carry ``{\"id\": \"...\", \"last_known_title\": null}`` — "
+            "the title is not available because the task is gone. "
+            "Cursor file: "
+            "``~/.cache/mcp-server-microsoft-tasks/<profile>/cursors.json``"
+            ", mode 0o600. Read-only on Graph; mutates only the local "
+            "cursor file."
+        ),
+    )
+    def tasks_changes_since(
+        scope: dict[str, Any],
+        max_results: int = 200,
+    ) -> dict[str, Any]:
+        return _do_tasks_changes_since(
+            scope,
+            profile=_get_profile(),
+            max_results=max_results,
         )
 
 
