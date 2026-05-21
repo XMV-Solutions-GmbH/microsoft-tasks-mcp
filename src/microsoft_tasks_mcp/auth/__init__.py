@@ -109,12 +109,34 @@ def _has_desktop_session() -> bool:
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
+# Stable, agent-readable instruction block. Both the CLI `_default_prompt`
+# and the MCP tool description for tasks_login_begin / tasks_login_status
+# emit this verbatim so an MCP-client agent can pattern-match the literal
+# `AGENT_INSTRUCTIONS:` marker and render the credentials correctly in
+# the chat UI.
+#
+# The wording optimises for "mobile copy → tap URL → paste code" — the
+# happy path of OAuth Device Code on a phone. A fenced code block gets a
+# one-click copy button; a bare URL becomes auto-linked. Anything else
+# (bold links, inline code, prose-embedded codes) breaks that flow.
+AGENT_INSTRUCTIONS = (
+    "AGENT_INSTRUCTIONS: Present the verification code to the user inside a "
+    "fenced code block (so it can be copied with one click) and present the "
+    "verification URL as a plain markdown link on its own line. Do not "
+    "paraphrase, do not embed the code inside prose, do not wrap the URL "
+    "in bold."
+)
+
+
 def _default_prompt(challenge: DeviceCodeChallenge) -> None:
     """Show the Device Code challenge to the human running login.
 
-    Output format follows the saved auto-memory `feedback_device_code_prompt_format`:
-    code FIRST in its own one-line code block (no labels), URL SECOND on
-    its own line as a plain auto-link. Mobile-friendly copy → click → paste.
+    Output shape is locked down by the `AGENT_INSTRUCTIONS` marker
+    above: an MCP-client agent that pipes this stderr to the chat UI
+    will see the explicit "render code in fenced block, URL as link"
+    instruction first, then the actual code already pre-formatted that
+    way. Agents that ignore the marker still get the right visual
+    output because the raw stderr is already in the target format.
 
     On a desktop session, also tries to open the verification URL
     automatically so the page is one click away.
@@ -129,16 +151,20 @@ def _default_prompt(challenge: DeviceCodeChallenge) -> None:
             opened = False
 
     if opened:
-        header = "Opening your browser to complete sign-in. If it didn't open, paste the URL below."
+        header = "Sign-in via Device Code flow. Browser opened automatically."
     else:
         header = "Sign in to mcp-server-microsoft-tasks via the Device Code flow."
 
-    # Code first, in its own bare code block; URL second, plain auto-link.
+    url_to_show = challenge.verification_uri_complete or challenge.verification_uri
+
+    # Code FIRST in a bare fenced block (no language tag, no labels);
+    # URL SECOND on its own line as a plain auto-link. See AGENT_INSTRUCTIONS.
     print(
         (
             f"\n{header}\n\n"
-            f"```\n{challenge.user_code}\n```\n\n"
-            f"{challenge.verification_uri}\n\n"
+            f"{AGENT_INSTRUCTIONS}\n\n"
+            f"Code:\n```\n{challenge.user_code}\n```\n\n"
+            f"Sign-in URL: {url_to_show}\n\n"
             "Waiting for sign-in..."
         ),
         file=sys.stderr,

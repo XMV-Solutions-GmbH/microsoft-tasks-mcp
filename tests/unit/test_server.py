@@ -36,6 +36,27 @@ def test_login_tools_always_registered(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "tasks_login_status" in names
 
 
+def test_login_tool_descriptions_carry_agent_instructions_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both tasks_login_begin and tasks_login_status MUST embed the literal
+    `AGENT_INSTRUCTIONS:` marker — closes #49. The marker is the contract
+    with pattern-matching MCP clients."""
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "false")
+    server_module = _build_fresh_server(monkeypatch)
+    server = server_module._build_server()
+    tools = server._tool_manager._tools
+    for name in ("tasks_login_begin", "tasks_login_status"):
+        tool = tools[name]
+        description = tool.description or ""
+        assert "AGENT_INSTRUCTIONS:" in description, (
+            f"{name} description must include the literal "
+            f"'AGENT_INSTRUCTIONS:' marker; got: {description!r}"
+        )
+        assert "fenced code block" in description
+        assert "markdown link" in description
+
+
 def test_writes_disabled_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """No write tools registered by default. v0.1 has no read tools yet
     either, so the only registered names are the two login tools."""
