@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import time as _time
 from typing import Any
 
 import pytest
@@ -201,3 +202,73 @@ def test_get_token_refresh_rejected_deletes_cache_and_raises(
 
     # Stale cache entry must be cleared so the next attempt starts fresh.
     assert fake.deleted_profiles == ["default"]
+
+
+# ---------------------------------------------------------------------
+# AGENT_INSTRUCTIONS rendering — closes #49
+# ---------------------------------------------------------------------
+
+
+def _challenge(
+    code: str = "ABCD-1234",
+    uri: str = "https://aka.ms/devicelogin",
+) -> flow.DeviceCodeChallenge:
+    return flow.DeviceCodeChallenge(
+        user_code=code,
+        verification_uri=uri,
+        verification_uri_complete=None,
+        expires_at=_time.time() + 900,
+        interval=5,
+        message="msg",
+    )
+
+
+def test_default_prompt_emits_agent_instructions_marker(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The literal `AGENT_INSTRUCTIONS:` marker is in the stderr output so
+    a pattern-matching MCP-client can detect it."""
+    auth._default_prompt(_challenge())
+    err = capsys.readouterr().err
+    assert "AGENT_INSTRUCTIONS:" in err
+
+
+def test_default_prompt_wraps_code_in_fenced_block(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An agent that copies the stderr verbatim still gets the right visual
+    output: the code is already inside ```...```."""
+    auth._default_prompt(_challenge(code="XYZ-9999"))
+    err = capsys.readouterr().err
+    assert "```\nXYZ-9999\n```" in err
+
+
+def test_default_prompt_emits_url_as_bare_link(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The verification URL appears as a bare URL on its own line — no `URL:`
+    prefix, no quoting — so chat UIs that auto-link bare URLs render it as
+    clickable."""
+    auth._default_prompt(
+        _challenge(uri="https://login.microsoftonline.com/common/oauth2/deviceauth")
+    )
+    err = capsys.readouterr().err
+    assert "Sign-in URL: https://login.microsoftonline.com/common/oauth2/deviceauth" in err
+
+
+def test_default_prompt_includes_no_paraphrase_clause(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The 'Do not paraphrase' rule is what stops well-meaning models from
+    formatting it 'helpfully'."""
+    auth._default_prompt(_challenge())
+    err = capsys.readouterr().err
+    assert "Do not paraphrase" in err
+
+
+def test_agent_instructions_constant_is_stable_string() -> None:
+    """The constant is a single string — agents pattern-match on the literal
+    `AGENT_INSTRUCTIONS:` prefix."""
+    assert auth.AGENT_INSTRUCTIONS.startswith("AGENT_INSTRUCTIONS:")
+    assert "fenced code block" in auth.AGENT_INSTRUCTIONS
+    assert "markdown link" in auth.AGENT_INSTRUCTIONS
