@@ -32,17 +32,21 @@ def _registered(server, name: str):  # type: ignore[no-untyped-def]
 
 @pytest.fixture(autouse=True)
 def _patch_token_in_each_tool_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Patch the upstream `auth` module so the binding survives
+    # `importlib.reload(server)` in `_build_fresh_server`. Patching only
+    # tool/server modules wouldn't help — reload re-runs their
+    # `from microsoft_tasks_mcp.auth import get_token` and picks up the
+    # real function again.
+    monkeypatch.setattr("microsoft_tasks_mcp.auth.get_token", lambda profile: "AT-int")
+    # Also patch each tool module's already-imported binding — these
+    # modules aren't reloaded, so the upstream patch alone wouldn't
+    # propagate to their local `get_token` reference.
     for mod_path in (
         "microsoft_tasks_mcp.tools.planner_plans",
         "microsoft_tasks_mcp.tools.planner_plan_get",
         "microsoft_tasks_mcp.tools.planner_buckets",
         "microsoft_tasks_mcp.tools.planner_tasks",
         "microsoft_tasks_mcp.tools.planner_task_get",
-        # Also patch the server module — _guard_planner_account_type
-        # calls get_token to detect personal-vs-work-school. Opaque
-        # "AT-int" decodes to `{}` claims, so is_personal_account returns
-        # False (conservative default = work/school), guard passes.
-        "microsoft_tasks_mcp.server",
     ):
         monkeypatch.setattr(f"{mod_path}.get_token", lambda profile: "AT-int")
 
