@@ -12,6 +12,7 @@ import pytest
 
 from microsoft_tasks_mcp.task_registry import TaskEntry, TaskRegistry
 from microsoft_tasks_mcp.tools._writes_common import (
+    ExternalListIdRequiredError,
     ExternallyModifiedError,
     NotOwnedByProfileError,
     require_owned_by_profile,
@@ -34,6 +35,7 @@ def test_require_owned_returns_entry_when_present(tmp_path: Path) -> None:
     reg = TaskRegistry("default", base_dir=tmp_path)
     reg.add(_entry("g1"))
     out = require_owned_by_profile(registry=reg, graph_id="g1", expected_source="todo")
+    assert out is not None
     assert out.graph_id == "g1"
 
 
@@ -52,6 +54,74 @@ def test_require_owned_rejects_source_mismatch(tmp_path: Path) -> None:
     reg.add(_entry("g1", source="planner"))
     with pytest.raises(NotOwnedByProfileError):
         require_owned_by_profile(registry=reg, graph_id="g1", expected_source="todo")
+
+
+# ---------------------------------------------------------------------
+# v0.7 (#57) — allow_external bypass
+# ---------------------------------------------------------------------
+
+
+def test_allow_external_returns_none_when_missing(tmp_path: Path) -> None:
+    """With allow_external=True, a task not in the registry returns None
+    rather than raising — the caller handles None by fetching a fresh
+    ETag via GET and proceeding."""
+    reg = TaskRegistry("default", base_dir=tmp_path)
+    out = require_owned_by_profile(
+        registry=reg,
+        graph_id="g-external",
+        expected_source="todo",
+        allow_external=True,
+    )
+    assert out is None
+
+
+def test_allow_external_returns_entry_when_present(tmp_path: Path) -> None:
+    """A task IS in the registry — allow_external doesn't change the
+    fast path, the entry is returned for cached list_id + etag reuse."""
+    reg = TaskRegistry("default", base_dir=tmp_path)
+    reg.add(_entry("g1"))
+    out = require_owned_by_profile(
+        registry=reg,
+        graph_id="g1",
+        expected_source="todo",
+        allow_external=True,
+    )
+    assert out is not None
+    assert out.graph_id == "g1"
+
+
+def test_allow_external_still_rejects_source_mismatch(tmp_path: Path) -> None:
+    """Source mismatch isn't an external-task scenario — it indicates
+    a caller bug (planner code path called for a todo entry, or vice
+    versa). Must still raise even with allow_external=True."""
+    reg = TaskRegistry("default", base_dir=tmp_path)
+    reg.add(_entry("g1", source="planner"))
+    with pytest.raises(NotOwnedByProfileError):
+        require_owned_by_profile(
+            registry=reg,
+            graph_id="g1",
+            expected_source="todo",
+            allow_external=True,
+        )
+
+
+def test_not_owned_error_message_mentions_external_writes_opt_in() -> None:
+    """The NOT_OWNED_BY_PROFILE message must mention the opt-in env var
+    so a naive agent can discover the unlock from the error alone
+    (Phase B of the onboarding scenario in #57)."""
+    err = NotOwnedByProfileError("todo", "g999")
+    assert "TASKS_ALLOW_EXTERNAL_WRITES" in str(err)
+
+
+def test_external_list_id_required_error_carries_graph_id() -> None:
+    """The ExternalListIdRequiredError is the error a To Do write tool
+    raises when the agent is acting on an external task but didn't
+    pass list_id."""
+    err = ExternalListIdRequiredError("g-external")
+    assert "EXTERNAL_LIST_ID_REQUIRED" in str(err)
+    assert err.graph_id == "g-external"
+    assert "TASKS_ALLOW_EXTERNAL_WRITES" in str(err)
+    assert "todo_lists" in str(err)
 
 
 def test_externally_modified_error_message_carries_graph_id() -> None:

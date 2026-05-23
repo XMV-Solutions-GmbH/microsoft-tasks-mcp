@@ -177,3 +177,84 @@ def test_no_etag_in_registry_means_no_if_match(
     )
     update_todo_task("T1", title="X", registry=reg)
     assert "If-Match" not in route.calls.last.request.headers
+
+
+# ---------------------------------------------------------------------
+# v0.7 (#57) — TASKS_ALLOW_EXTERNAL_WRITES path
+# ---------------------------------------------------------------------
+
+
+@respx.mock
+def test_external_write_fetches_fresh_etag_and_patches(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """With external-writes on AND the task not in the registry,
+    update_todo_task must:
+    1. fetch the current task to learn the @odata.etag
+    2. PATCH with If-Match: <that etag>
+    3. NOT add a synthetic registry entry afterwards."""
+    monkeypatch.setenv("TASKS_ALLOW_EXTERNAL_WRITES", "true")
+    _patch_get_token(monkeypatch)
+    reg = TaskRegistry("default", base_dir=tmp_path)  # empty
+
+    respx.get(URL_TMPL.format("L-ext", "T-ext")).respond(
+        json={
+            "id": "T-ext",
+            "title": "Manually typed",
+            "@odata.etag": 'W/"external"',
+        }
+    )
+    patch_route = respx.patch(URL_TMPL.format("L-ext", "T-ext")).respond(
+        json={"id": "T-ext", "title": "Now updated", "@odata.etag": 'W/"after"'}
+    )
+
+    out = update_todo_task("T-ext", title="Now updated", list_id="L-ext", registry=reg)
+    assert out["title"] == "Now updated"
+    # If-Match was carried from the fresh GET
+    assert patch_route.calls.last.request.headers["If-Match"] == 'W/"external"'
+    # Registry not polluted with a synthetic entry
+    assert reg.get("T-ext") is None
+
+
+def test_external_write_missing_list_id_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The To Do API needs list_id in the URL — without registry entry
+    AND without explicit list_id, the tool can't construct the URL."""
+    from microsoft_tasks_mcp.tools._writes_common import ExternalListIdRequiredError
+
+    monkeypatch.setenv("TASKS_ALLOW_EXTERNAL_WRITES", "true")
+    _patch_get_token(monkeypatch)
+    reg = TaskRegistry("default", base_dir=tmp_path)
+    with pytest.raises(ExternalListIdRequiredError):
+        update_todo_task("T-ext", title="X", registry=reg)
+
+
+def test_external_write_flag_off_still_refuses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without TASKS_ALLOW_EXTERNAL_WRITES, the registry guard fires
+    even when list_id IS supplied — the flag is the only unlock."""
+    monkeypatch.delenv("TASKS_ALLOW_EXTERNAL_WRITES", raising=False)
+    _patch_get_token(monkeypatch)
+    reg = TaskRegistry("default", base_dir=tmp_path)
+    with pytest.raises(NotOwnedByProfileError):
+        update_todo_task("T-ext", title="X", list_id="L-ext", registry=reg)
+
+
+@respx.mock
+def test_external_write_in_registry_ignores_explicit_list_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When the task IS in the registry, the registry's list_id is
+    authoritative — a caller-supplied list_id mismatch must NOT
+    redirect the write to the wrong list."""
+    monkeypatch.setenv("TASKS_ALLOW_EXTERNAL_WRITES", "true")
+    _patch_get_token(monkeypatch)
+    reg = _seed_registry(tmp_path)  # entry with list_or_plan_id="L1"
+    route = respx.patch(URL_TMPL.format("L1", "T1")).respond(
+        json={"id": "T1", "title": "X", "@odata.etag": 'W/"new"'}
+    )
+    update_todo_task("T1", title="X", list_id="L-wrong", registry=reg)
+    # The PATCH went to /L1/..., NOT /L-wrong/...
+    assert route.calls.call_count == 1

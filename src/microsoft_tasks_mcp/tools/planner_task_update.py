@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from microsoft_tasks_mcp.auth import get_token
+from microsoft_tasks_mcp.auth.flow import external_writes_enabled
 from microsoft_tasks_mcp.task_registry import TaskRegistry
 from microsoft_tasks_mcp.tools._common import (
     PLANNER_BETA_ENV,
@@ -83,10 +84,12 @@ def update_planner_task(
 
     task_id_s = task_id.strip()
     reg = registry if registry is not None else TaskRegistry(profile)
+    allow_ext = external_writes_enabled()
     entry = require_owned_by_profile(
         registry=reg,
         graph_id=task_id_s,
         expected_source="planner",
+        allow_external=allow_ext,
     )
 
     payload: dict[str, Any] = {}
@@ -120,11 +123,26 @@ def update_planner_task(
         "Content-Type": "application/json",
         "Prefer": "return=representation",
     }
-    if entry.etag:
-        headers["If-Match"] = entry.etag
 
     client = http if http is not None else httpx.Client(timeout=30.0)
     try:
+        # In-registry path uses the cached etag; external-writes path
+        # (TASKS_ALLOW_EXTERNAL_WRITES=true; entry is None) does a
+        # preliminary GET so the EXTERNALLY_MODIFIED guard still applies.
+        if entry is not None:
+            current_etag = entry.etag
+        else:
+            get_resp = client.get(
+                f"{graph_planner_base()}/planner/tasks/{task_id_s}",
+                headers=auth_headers(token),
+            )
+            get_resp.raise_for_status()
+            get_payload = get_resp.json()
+            current_etag = get_payload.get("@odata.etag") if isinstance(get_payload, dict) else None
+
+        if current_etag:
+            headers["If-Match"] = current_etag
+
         response = client.patch(
             f"{graph_planner_base()}/planner/tasks/{task_id_s}",
             headers=headers,
@@ -151,6 +169,7 @@ def update_planner_task(
         if http is None:
             client.close()
 
-    new_etag = envelope.get("etag") if isinstance(envelope.get("etag"), str) else None
-    reg.update_etag(task_id_s, new_etag)
+    if entry is not None:
+        new_etag = envelope.get("etag") if isinstance(envelope.get("etag"), str) else None
+        reg.update_etag(task_id_s, new_etag)
     return envelope

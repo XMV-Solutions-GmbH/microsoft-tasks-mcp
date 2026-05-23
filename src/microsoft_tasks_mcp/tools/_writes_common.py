@@ -94,6 +94,33 @@ def validate_planner_recurrence(recurrence: Any) -> None:
         )
 
 
+class ExternalListIdRequiredError(ValueError):
+    """Raised by a To Do write tool when external-writes is enabled and
+    the caller is acting on a task that isn't in the profile's
+    registry, but didn't pass the `list_id` argument the tool needs to
+    construct the `/me/todo/lists/{listId}/tasks/{taskId}` URL.
+
+    Microsoft Graph's To Do API has no `/me/todo/tasks/{taskId}` shape —
+    tasks are addressable only via their containing list. For tasks
+    this MCP profile created, the list_id lives in the registry; for
+    external tasks under the `TASKS_ALLOW_EXTERNAL_WRITES=true` path
+    the agent must supply it explicitly.
+
+    Planner tools never raise this — Planner tasks are addressable by
+    id alone (`/planner/tasks/{taskId}`).
+    """
+
+    def __init__(self, graph_id: str) -> None:
+        super().__init__(
+            f"EXTERNAL_LIST_ID_REQUIRED: task {graph_id!r} is not in this "
+            "MCP profile's registry. With TASKS_ALLOW_EXTERNAL_WRITES=true "
+            "you may act on tasks created elsewhere, but you must pass "
+            "the `list_id` argument so the tool can address the task on "
+            "Microsoft Graph. Discover list ids via the `todo_lists` tool.",
+        )
+        self.graph_id = graph_id
+
+
 class NotOwnedByProfileError(RuntimeError):
     """Raised when a write tool is asked to act on a task that this
     profile's registry doesn't track.
@@ -109,7 +136,12 @@ class NotOwnedByProfileError(RuntimeError):
             f"NOT_OWNED_BY_PROFILE: task {graph_id!r} (source={source!r}) "
             "is not in this MCP profile's created-by-me registry. The "
             "MCP server refuses to update / complete / delete tasks "
-            "it did not create itself.",
+            "it did not create itself. To opt the operator into "
+            "letting this MCP server act on externally-created tasks "
+            "too (e.g. tasks typed manually in the Microsoft To Do app "
+            "by the same user), set TASKS_ALLOW_EXTERNAL_WRITES=true "
+            "in the MCP client config. Default behaviour (this error) "
+            "is the safer choice for shared / multi-author setups.",
         )
         self.source = source
         self.graph_id = graph_id
@@ -136,14 +168,32 @@ def require_owned_by_profile(
     registry: TaskRegistry,
     graph_id: str,
     expected_source: str,
-) -> TaskEntry:
-    """Raise `NotOwnedByProfileError` if `graph_id` isn't in the registry.
+    allow_external: bool = False,
+) -> TaskEntry | None:
+    """Look up `graph_id` in the registry and gate by ownership.
 
-    Returns the existing entry on success. Used by every write tool
-    before it makes any Microsoft Graph call — the guard is at the
-    tool layer, not at Graph, so even a mis-scoped attempt is caught.
+    Default mode (`allow_external=False`): raises `NotOwnedByProfileError`
+    if the task isn't in the registry or has the wrong source. Returns
+    the entry on success. This is the load-bearing safety guard that
+    makes "agent never modifies tasks created by humans or other agents"
+    true.
+
+    External-writes mode (`allow_external=True`, enabled via
+    `TASKS_ALLOW_EXTERNAL_WRITES=true`; #57): returns the entry if
+    present, or `None` if the task isn't in the registry. The caller
+    is responsible for fetching the current ETag from Graph and
+    threading it through `If-Match` — the EXTERNALLY_MODIFIED guard
+    still applies, only the ownership-by-this-MCP guard is relaxed.
+
+    A registry entry with the WRONG source (e.g. a `planner` task in
+    the To Do code path) is still rejected even with `allow_external`,
+    because that mismatch indicates a caller bug, not an external task.
     """
     entry = registry.get(graph_id)
-    if entry is None or entry.source != expected_source:
+    if entry is None:
+        if allow_external:
+            return None
+        raise NotOwnedByProfileError(expected_source, graph_id)
+    if entry.source != expected_source:
         raise NotOwnedByProfileError(expected_source, graph_id)
     return entry

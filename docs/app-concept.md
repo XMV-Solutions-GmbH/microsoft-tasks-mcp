@@ -156,6 +156,25 @@ This catches the case where the user themselves edited the task in the Microsoft
 
 The default install registers only the read tools + login tools. Write tools are registered only when `TASKS_ALLOW_WRITES=true`. The OAuth scope set is also conditional: `Tasks.ReadWrite` is requested only when the env flag is set, so a default install's consent prompt stays read-only.
 
+### External-task writes — opt-in via `TASKS_ALLOW_EXTERNAL_WRITES`
+
+By default, the write tools refuse to mutate any task not in this MCP profile's created-by-me registry. This is the "agent never modifies tasks created by humans or other agents" guarantee. The error code is `NOT_OWNED_BY_PROFILE`.
+
+For **personal single-user setups** — where the operator is also the only task author and the registry guard is friction rather than safety — set `TASKS_ALLOW_EXTERNAL_WRITES=true` (in addition to `TASKS_ALLOW_WRITES=true`). The write tools then act on any task the signed-in user has permission for, including tasks typed manually in the Microsoft To Do app or created by other Planner members. The `EXTERNALLY_MODIFIED` (412) guard still applies — every external write does a preliminary GET to learn the current `@odata.etag`, then PATCHes with `If-Match`, so concurrent edits remain safe.
+
+For To Do tools, external writes also require the agent to pass `list_id` explicitly (Microsoft Graph's To Do API has no `/me/todo/tasks/{id}` shape — tasks are addressable only via their containing list). The `todo_lists` tool surfaces the available list ids.
+
+The flag is opt-in and has no effect when `TASKS_ALLOW_WRITES=false`. Invalid values raise loudly at startup (no silent fall-through to safe-off).
+
+| Env state | Behaviour |
+|---|---|
+| `TASKS_ALLOW_WRITES` unset / invalid | Server refuses to start (exit 2 with onboarding-help message) |
+| `TASKS_ALLOW_WRITES=false` | Read-only. No write tools registered. `TASKS_ALLOW_EXTERNAL_WRITES` ignored. |
+| `TASKS_ALLOW_WRITES=true` + `TASKS_ALLOW_EXTERNAL_WRITES` unset/false | Write tools registered; registry guard enforces ownership |
+| `TASKS_ALLOW_WRITES=true` + `TASKS_ALLOW_EXTERNAL_WRITES=true` | Write tools registered; registry guard is advisory (external tasks allowed) |
+
+The `tasks_login_status` response carries an `available_flags` block that names both env vars with one-line descriptions of what each unlocks, so a naive MCP client can discover the surface in-band without consulting these docs.
+
 ### No autonomous decisions on assignees
 
 `planner_task_create(plan_id, bucket_id, title, ..., assignees?)` accepts an `assignees` argument with explicit user-IDs. The agent only fills it from values the user typed in chat. There's no codepath where the agent looks up colleagues and assigns them work without explicit human typing.
