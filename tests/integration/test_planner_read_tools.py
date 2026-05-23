@@ -38,6 +38,11 @@ def _patch_token_in_each_tool_module(monkeypatch: pytest.MonkeyPatch) -> None:
         "microsoft_tasks_mcp.tools.planner_buckets",
         "microsoft_tasks_mcp.tools.planner_tasks",
         "microsoft_tasks_mcp.tools.planner_task_get",
+        # Also patch the server module — _guard_planner_account_type
+        # calls get_token to detect personal-vs-work-school. Opaque
+        # "AT-int" decodes to `{}` claims, so is_personal_account returns
+        # False (conservative default = work/school), guard passes.
+        "microsoft_tasks_mcp.server",
     ):
         monkeypatch.setattr(f"{mod_path}.get_token", lambda profile: "AT-int")
 
