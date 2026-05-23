@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Tracked in [GitHub Issues](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues).
 
+## [v0.6.0] — 2026-05-23
+
 ### Added
 
 - **`account_type` parameter on the login surface** (CLI `--account-type` and MCP tool `tasks_login_begin`) with two values: `"personal"` (outlook.com / hotmail.com / live.com / msn.com — To Do works, Planner refuses) and `"work_or_school"` (M365 tenant accounts incl. B2B guests — both work). The MCP tool description and the `LoginAccountTypeRequiredError` message both carry an `AGENT_INSTRUCTIONS:` marker so MCP clients can pattern-match the elicit-the-user UX. Closes [#54](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues/54).
