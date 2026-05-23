@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 import respx
@@ -83,7 +84,7 @@ def _patched_get_token(monkeypatch: pytest.MonkeyPatch, store: _MemStore) -> Non
 _ONBOARDING_KEYS = ("writes_enabled", "external_writes_enabled", "available_flags")
 
 
-def _without_onboarding(result: dict) -> dict:
+def _without_onboarding(result: dict[str, Any]) -> dict[str, Any]:
     """Strip the v0.7 (#57) onboarding block for the legacy exact-equality
     assertions. The onboarding block is exercised separately below."""
     return {k: v for k, v in result.items() if k not in _ONBOARDING_KEYS}

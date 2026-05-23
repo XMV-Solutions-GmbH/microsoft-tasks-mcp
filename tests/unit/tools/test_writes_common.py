@@ -35,6 +35,7 @@ def test_require_owned_returns_entry_when_present(tmp_path: Path) -> None:
     reg = TaskRegistry("default", base_dir=tmp_path)
     reg.add(_entry("g1"))
     out = require_owned_by_profile(registry=reg, graph_id="g1", expected_source="todo")
+    assert out is not None
     assert out.graph_id == "g1"
 
 
