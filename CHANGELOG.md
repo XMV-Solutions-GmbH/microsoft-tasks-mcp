@@ -12,6 +12,11 @@ Tracked in [GitHub Issues](https://github.com/XMV-Solutions-GmbH/microsoft-tasks
 
 ### Added
 
+- **Personal Microsoft accounts supported for the To Do half.** The XMV-hosted Entra app's `signInAudience` was widened from `AzureADMultipleOrgs` to `AzureADandPersonalMicrosoftAccount`, and the default OAuth authority from `/organizations` to `/common`. Multi-tenant B2B is unaffected — `/common` is a superset of `/organizations`. The `todo_*` tools (Microsoft To Do) work on both account types. The `planner_*` tools refuse personal accounts client-side with a clear message since Planner requires an M365 Group (a work/school-only construct).
+- **`microsoft_tasks_mcp.auth.is_personal_account(token)`** + **`signed_in_account_type(token)`** — JWT-claims-based detectors. Returns `True` iff the token's `tid` matches the global consumer-tenant GUID.
+- **`server._guard_planner_account_type(profile)`** — runtime guard called from the top of every `planner_*` MCP-tool wrapper. Raises `PermissionError` with a message naming the `todo_*` alternative when the signed-in account is consumer.
+- **Harness profile `harness-personal`** — separate token cache + matching `MS_TASKS_HARNESS_PERSONAL_TOKEN_JSON` repo secret. `ci.yml` restores both caches; personal-account harness tests skip silently if the personal secret is absent.
+
 - **`tasks_changes_since(scope, max_results)`** — new MCP tool (closes #41). Polls Microsoft Graph for Planner tasks and diffs against an on-disk cursor, returning `{"added": [...], "modified": [...], "removed": [...], "cursor_advanced": bool}`. Three scope kinds: `{"kind": "plan", "plan_id": "..."}` (all tasks in one plan), `{"kind": "assigned_to_me"}` (tasks assigned to the signed-in user), `{"kind": "registry"}` (one GET per task id in the profile's task registry). Cursor file lives at `~/.cache/mcp-server-microsoft-tasks/<profile>/cursors.json` (mode 0o600), keyed by sha256 of the JSON-serialised scope. Writes are atomic (temp-file + rename). First call returns everything as `added`; subsequent calls return only what changed since the last poll. `last_modified_max` is monotonic — a stale Graph timestamp never rolls the cursor back.
 
 ## [v0.5.0] — 2026-05-12

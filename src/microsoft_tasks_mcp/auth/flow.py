@@ -55,7 +55,16 @@ from mcp_microsoft_graph_auth.tokens import CachedToken
 # `resolve_scopes()` below for the lazy-request semantic.
 # Override via TASKS_CLIENT_ID for tenants with strict app-allowlisting.
 DEFAULT_CLIENT_ID = "0faf4ede-b330-4034-a49f-cbb47eac0ccd"
-DEFAULT_AUTHORITY_TENANT = "organizations"
+# `common` accepts both AzureAD (work/school) AND personal Microsoft
+# accounts (outlook.com / hotmail.com / live.com). The XMV-hosted app
+# registration has `signInAudience=AzureADandPersonalMicrosoftAccount`
+# since v0.x (personal-account-support PR), so the consent screen lets
+# consumer accounts through for the To Do tools. Microsoft Planner is
+# work/school-only and the `planner_*` MCP tools guard at call-site
+# via `is_personal_account()` — see server.py `_guard_planner_account_type`.
+# Multi-tenant B2B is unaffected: `common` is a superset of
+# `organizations`.
+DEFAULT_AUTHORITY_TENANT = "common"
 
 # Env var that opts the running MCP server into requesting Tasks.ReadWrite
 # at OAuth time (and registering the write tools as MCP tools). v0.5

@@ -29,8 +29,11 @@ def test_default_client_id_matches_registered_entra_app() -> None:
     assert flow.DEFAULT_CLIENT_ID == "0faf4ede-b330-4034-a49f-cbb47eac0ccd"
 
 
-def test_default_authority_tenant_is_organizations() -> None:
-    assert flow.DEFAULT_AUTHORITY_TENANT == "organizations"
+def test_default_authority_tenant_is_common() -> None:
+    """Since the personal-account-support PR, the default authority is
+    `common` — accepts both AzureAD (work/school) and personal MSAs.
+    The XMV Entra app's signInAudience was widened to match."""
+    assert flow.DEFAULT_AUTHORITY_TENANT == "common"
 
 
 def test_default_scopes_backwards_compat_shape() -> None:

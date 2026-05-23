@@ -28,6 +28,7 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
+from microsoft_tasks_mcp.auth import get_token, is_personal_account
 from microsoft_tasks_mcp.auth.flow import (
     TasksConsentNotConfiguredError,
     planner_disabled,
@@ -99,6 +100,31 @@ DEFAULT_PROFILE = "default"
 
 def _get_profile() -> str:
     return os.environ.get(PROFILE_ENV, DEFAULT_PROFILE)
+
+
+def _guard_planner_account_type(profile: str) -> None:
+    """Refuse Planner tool calls on personal Microsoft accounts.
+
+    Microsoft Planner requires a Microsoft 365 Group, which is a work/
+    school-only construct — personal MSAs (outlook.com / hotmail.com /
+    live.com) have no equivalent. Calls from a consumer token would
+    403 at Graph anyway (the `Group.Read.All` scope can't be granted on
+    consumer accounts at OAuth time). We refuse client-side with a
+    clearer message that points the agent at the available alternative.
+
+    Called from the top of every `planner_*` MCP-tool wrapper. The
+    matching `todo_*` tools (Microsoft To Do) work on both account
+    types and don't carry this guard.
+    """
+    if is_personal_account(get_token(profile=profile)):
+        raise PermissionError(
+            "Microsoft Planner is only available on Microsoft 365 work or "
+            "school accounts. The signed-in account is a personal Microsoft "
+            "account (outlook.com / hotmail.com / live.com); Planner has no "
+            "consumer equivalent. The `todo_*` tools (Microsoft To Do) work "
+            "on personal accounts and cover most personal task-tracking use "
+            "cases."
+        )
 
 
 def register_login_tools(mcp_instance: FastMCP) -> None:
@@ -381,6 +407,7 @@ def register_planner_read_tools(mcp_instance: FastMCP) -> None:
         group_id: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
+        _guard_planner_account_type(_get_profile())
         return _do_planner_plans(
             group_id=group_id,
             limit=limit,
@@ -400,6 +427,7 @@ def register_planner_read_tools(mcp_instance: FastMCP) -> None:
         ),
     )
     def planner_plan_get(plan_id: str) -> dict[str, Any]:
+        _guard_planner_account_type(_get_profile())
         return _do_planner_plan_get(plan_id, profile=_get_profile())
 
     @mcp_instance.tool(
@@ -418,6 +446,7 @@ def register_planner_read_tools(mcp_instance: FastMCP) -> None:
         ),
     )
     def planner_buckets(plan_id: str) -> list[dict[str, Any]]:
+        _guard_planner_account_type(_get_profile())
         return _do_planner_buckets(plan_id, profile=_get_profile())
 
     @mcp_instance.tool(
@@ -448,6 +477,7 @@ def register_planner_read_tools(mcp_instance: FastMCP) -> None:
         status_filter: str = "all",
         limit: int = 100,
     ) -> list[dict[str, Any]]:
+        _guard_planner_account_type(_get_profile())
         return _do_planner_tasks(
             plan_id,
             bucket_id=bucket_id,
@@ -476,6 +506,7 @@ def register_planner_read_tools(mcp_instance: FastMCP) -> None:
         task_id: str,
         include_details: bool = False,
     ) -> dict[str, Any]:
+        _guard_planner_account_type(_get_profile())
         return _do_planner_task_get(
             task_id,
             include_details=include_details,
@@ -708,6 +739,7 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
         assignees: list[str] | None = None,
         recurrence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        _guard_planner_account_type(_get_profile())
         return _do_planner_task_create(
             plan_id,
             bucket_id,
@@ -753,6 +785,7 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
         priority: int | None = None,
         recurrence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        _guard_planner_account_type(_get_profile())
         # Forward recurrence only when the agent explicitly passed
         # something. The underlying function uses an _UNSET sentinel
         # to distinguish "leave unchanged" from "set to null"; the
@@ -788,6 +821,7 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
         ),
     )
     def planner_task_complete(task_id: str) -> dict[str, Any]:
+        _guard_planner_account_type(_get_profile())
         return _do_planner_task_complete(task_id, profile=_get_profile())
 
     @mcp_instance.tool(
@@ -807,6 +841,7 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
         ),
     )
     def planner_task_delete(task_id: str) -> None:
+        _guard_planner_account_type(_get_profile())
         _do_planner_task_delete(task_id, profile=_get_profile())
 
     @mcp_instance.tool(
@@ -838,6 +873,7 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
         alias: str | None = None,
         type_hint: str | None = None,
     ) -> dict[str, Any]:
+        _guard_planner_account_type(_get_profile())
         return _do_planner_task_add_reference(
             task_id,
             url,
@@ -866,6 +902,7 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
         ),
     )
     def planner_task_remove_reference(task_id: str, url: str) -> dict[str, Any]:
+        _guard_planner_account_type(_get_profile())
         return _do_planner_task_remove_reference(
             task_id,
             url,

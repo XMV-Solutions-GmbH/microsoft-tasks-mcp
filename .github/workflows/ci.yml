@@ -99,18 +99,31 @@ jobs:
       - name: Install package + dev dependencies
         run: uv sync --extra dev
 
-      - name: Restore harness token cache from secret
+      - name: Restore harness token cache from secret (work/school)
         env:
           TOKEN_B64: ${{ secrets.MS_TASKS_HARNESS_TOKEN_JSON }}
         run: |
           if [ -z "$TOKEN_B64" ]; then
-            echo "::warning::MS_TASKS_HARNESS_TOKEN_JSON not set — harness tests will be skipped."
+            echo "::warning::MS_TASKS_HARNESS_TOKEN_JSON not set — work/school harness tests will be skipped."
             exit 0
           fi
           mkdir -p ~/.cache/mcp-server-microsoft-tasks/harness
           printf '%s' "$TOKEN_B64" | base64 -d > ~/.cache/mcp-server-microsoft-tasks/harness/token.json
           chmod 600 ~/.cache/mcp-server-microsoft-tasks/harness/token.json
-          echo "Harness token cache restored ($(wc -c < ~/.cache/mcp-server-microsoft-tasks/harness/token.json) bytes)."
+          echo "Work/school harness token cache restored ($(wc -c < ~/.cache/mcp-server-microsoft-tasks/harness/token.json) bytes)."
+
+      - name: Restore harness-personal token cache from secret
+        env:
+          TOKEN_B64: ${{ secrets.MS_TASKS_HARNESS_PERSONAL_TOKEN_JSON }}
+        run: |
+          if [ -z "$TOKEN_B64" ]; then
+            echo "::notice::MS_TASKS_HARNESS_PERSONAL_TOKEN_JSON not set — personal-account harness tests will be skipped."
+            exit 0
+          fi
+          mkdir -p ~/.cache/mcp-server-microsoft-tasks/harness-personal
+          printf '%s' "$TOKEN_B64" | base64 -d > ~/.cache/mcp-server-microsoft-tasks/harness-personal/token.json
+          chmod 600 ~/.cache/mcp-server-microsoft-tasks/harness-personal/token.json
+          echo "Personal harness token cache restored ($(wc -c < ~/.cache/mcp-server-microsoft-tasks/harness-personal/token.json) bytes)."
 
       - name: Run harness tests against real Microsoft Graph
         env:
