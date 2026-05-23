@@ -37,7 +37,15 @@ def _patch_token_in_each_tool_module(monkeypatch: pytest.MonkeyPatch) -> None:
     # tool/server modules wouldn't help — reload re-runs their
     # `from microsoft_tasks_mcp.auth import get_token` and picks up the
     # real function again.
-    monkeypatch.setattr("microsoft_tasks_mcp.auth.get_token", lambda profile: "AT-int")
+    #
+    # Token shape: a 3-segment JWT-like string so the new (#54) opaque-
+    # token-is-personal detector classifies it as work/school. Without
+    # this, the `_guard_planner_account_type` server-side guard would
+    # refuse every planner_* call before the test's HTTP mocks even
+    # match. The contents are still meaningless; integration tests stub
+    # at the HTTP boundary, not the JWT layer.
+    fake_token = "hdr.payload.sig"
+    monkeypatch.setattr("microsoft_tasks_mcp.auth.get_token", lambda profile: fake_token)
     # Also patch each tool module's already-imported binding — these
     # modules aren't reloaded, so the upstream patch alone wouldn't
     # propagate to their local `get_token` reference.
@@ -48,7 +56,7 @@ def _patch_token_in_each_tool_module(monkeypatch: pytest.MonkeyPatch) -> None:
         "microsoft_tasks_mcp.tools.planner_tasks",
         "microsoft_tasks_mcp.tools.planner_task_get",
     ):
-        monkeypatch.setattr(f"{mod_path}.get_token", lambda profile: "AT-int")
+        monkeypatch.setattr(f"{mod_path}.get_token", lambda profile: fake_token)
 
 
 @respx.mock

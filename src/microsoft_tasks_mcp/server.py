@@ -182,6 +182,19 @@ def register_login_tools(mcp_instance: FastMCP) -> None:
             "cap). The agent then polls `tasks_login_status` until it "
             "flips to `signed_in` (or to a terminal `expired` / "
             "`failed`). "
+            "REQUIRED parameter `account_type`: pass 'personal' for "
+            "outlook.com / hotmail.com / live.com / msn.com (Microsoft "
+            "To Do works; Planner does NOT — requires a work/school "
+            "M365 group), or 'work_or_school' for any Microsoft 365 "
+            "tenant account incl. B2B guests (both To Do and Planner "
+            "work). The choice determines which Microsoft Device Code "
+            "landing page the user is sent to "
+            "(`https://www.microsoft.com/link` vs "
+            "`https://login.microsoft.com/device`) — there is no "
+            "auto-detection before sign-in. If you don't know, ASK "
+            "THE USER first. Calling without `account_type` returns "
+            "a structured error explicitly instructing you to elicit "
+            "the choice. "
             "Idempotent: a non-expired pending session for the profile "
             "is returned as-is unless `force=True`. `force=True` "
             "cancels the in-flight session and starts a fresh flow. "
@@ -199,17 +212,19 @@ def register_login_tools(mcp_instance: FastMCP) -> None:
             "    ```\n"
             "    ABCD-1234\n"
             "    ```\n\n"
-            "    Sign-in URL: https://login.microsoftonline.com/...\n\n"
+            "    Sign-in URL: https://www.microsoft.com/link\n\n"
             "Rationale: in a chat UI, a code inside a fenced block gets a "
             "one-click copy button; a bare URL becomes clickable; bold-wrapped "
             "links and inline codes do not."
         ),
     )
     async def tasks_login_begin(
+        account_type: str | None = None,
         force: bool = False,
         ctx: Context[Any, Any] | None = None,
     ) -> dict[str, Any]:
         return await _do_login_begin(
+            account_type=account_type,
             profile=_get_profile(),
             force=force,
             ctx=ctx,

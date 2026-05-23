@@ -43,10 +43,16 @@ Requires Python 3.11+. Works on Linux, macOS, Windows.
 ### 1. Sign in once (out of band)
 
 ```bash
-uvx mcp-server-microsoft-tasks login
+uvx mcp-server-microsoft-tasks login --account-type work_or_school
+# or, for a personal Microsoft account:
+uvx mcp-server-microsoft-tasks login --account-type personal
 ```
 
-The output renders the device code first in its own code block, the URL second on its own line. Copy the code, click the link, paste, sign in with your M365 account. Your refresh token is cached locally (OS keyring on macOS / Windows / Linux desktop; encrypted-file fallback otherwise). The MCP server itself never blocks for human interaction afterwards.
+The `--account-type` flag is required: `work_or_school` for any Microsoft 365 tenant account (both Planner and To Do work), `personal` for outlook.com / hotmail.com / live.com / msn.com (only To Do works — Planner needs a work/school M365 group). Internally this picks the right Microsoft Identity Device Code authority (`/organizations` vs `/consumers`); `TASKS_TENANT_ID` is kept as a power-user / CI escape hatch.
+
+The output renders the device code first in its own code block, the URL second on its own line. Copy the code, click the link, paste, sign in. Your refresh token is cached locally (OS keyring on macOS / Windows / Linux desktop; encrypted-file fallback otherwise). The MCP server itself never blocks for human interaction afterwards.
+
+When used through an MCP tool (`tasks_login_begin`), the agent receives the same `account_type` requirement via tool-schema description; calling without it returns a structured `LoginAccountTypeRequiredError` that instructs the agent to ask the user which account kind to sign in with.
 
 ### 2. Wire it into Claude Code (or any MCP client)
 

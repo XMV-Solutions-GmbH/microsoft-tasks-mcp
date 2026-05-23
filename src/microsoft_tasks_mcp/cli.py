@@ -54,6 +54,20 @@ def _build_parser() -> argparse.ArgumentParser:
         default="default",
         help="Profile name (namespace for token cache). Default: 'default'.",
     )
+    login_p.add_argument(
+        "--account-type",
+        choices=("personal", "work_or_school"),
+        default=None,
+        help=(
+            "Which kind of Microsoft account to sign in with. "
+            "'personal' for outlook.com / hotmail.com / live.com / msn.com "
+            "(Microsoft To Do works; Planner does NOT — requires a "
+            "work/school M365 group). 'work_or_school' for any Microsoft 365 "
+            "tenant account incl. B2B guests (both To Do and Planner work). "
+            "REQUIRED unless TASKS_TENANT_ID is set as an explicit "
+            "power-user override."
+        ),
+    )
 
     logout_p = subparsers.add_parser(
         "logout",
@@ -97,9 +111,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
 
     if args.command == "login":
-        from microsoft_tasks_mcp.auth import interactive_login
+        from microsoft_tasks_mcp.auth import (
+            LoginAccountTypeRequiredError,
+            interactive_login,
+        )
 
-        interactive_login(profile=args.profile)
+        try:
+            interactive_login(
+                profile=args.profile,
+                account_type=args.account_type,
+            )
+        except LoginAccountTypeRequiredError as err:
+            sys.stderr.write(str(err) + "\n")
+            return 2
         return 0
 
     if args.command == "logout":
