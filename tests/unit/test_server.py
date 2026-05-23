@@ -244,3 +244,65 @@ def test_build_server_consent_true_registers_writes(monkeypatch: pytest.MonkeyPa
     names = _registered_tool_names(server)
     assert "todo_task_create" in names
     assert "planner_task_create" in names  # default-on Planner
+
+
+# ---------------------------------------------------------------------
+# _guard_planner_account_type — personal-account refusal
+# ---------------------------------------------------------------------
+
+
+def _fake_jwt_with_tid(tid: str) -> str:
+    """Compose a 3-segment JWT-shaped string with the given `tid` claim.
+
+    Signature is junk — `is_personal_account()` decodes claims without
+    verification (the token already passed Microsoft's checks upstream).
+    """
+    import base64
+    import json
+
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "none"}).encode()).rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps({"tid": tid}).encode()).rstrip(b"=").decode()
+    return f"{header}.{payload}.sig"
+
+
+def test_guard_planner_refuses_personal_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Personal MSAs can't access Planner — Microsoft platform restriction,
+    not XMV policy. The guard raises with a message naming the alternative
+    (`todo_*` tools)."""
+    from microsoft_tasks_mcp.auth.account_type import CONSUMER_TENANT_ID
+    from microsoft_tasks_mcp.server import _guard_planner_account_type
+
+    monkeypatch.setattr(
+        "microsoft_tasks_mcp.server.get_token",
+        lambda profile="default": _fake_jwt_with_tid(CONSUMER_TENANT_ID),
+    )
+    with pytest.raises(PermissionError, match="personal Microsoft account"):
+        _guard_planner_account_type("default")
+
+
+def test_guard_planner_allows_work_school_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Work/school tid → Planner is available, guard short-circuits."""
+    from microsoft_tasks_mcp.server import _guard_planner_account_type
+
+    monkeypatch.setattr(
+        "microsoft_tasks_mcp.server.get_token",
+        lambda profile="default": _fake_jwt_with_tid("7be9152f-5514-4a2d-b3d1-9aa5acf966c8"),
+    )
+    _guard_planner_account_type("default")  # no exception
+
+
+def test_guard_planner_error_mentions_todo_alternative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The error message tells the agent what DOES work (`todo_*`) so it
+    can offer the user an alternative rather than giving up."""
+    from microsoft_tasks_mcp.auth.account_type import CONSUMER_TENANT_ID
+    from microsoft_tasks_mcp.server import _guard_planner_account_type
+
+    monkeypatch.setattr(
+        "microsoft_tasks_mcp.server.get_token",
+        lambda profile="default": _fake_jwt_with_tid(CONSUMER_TENANT_ID),
+    )
+    with pytest.raises(PermissionError) as exc_info:
+        _guard_planner_account_type("default")
+    assert "todo_" in str(exc_info.value)

@@ -34,6 +34,11 @@ from collections.abc import Callable
 
 import httpx
 
+from microsoft_tasks_mcp.auth.account_type import (
+    CONSUMER_TENANT_ID,
+    is_personal_account,
+    signed_in_account_type,
+)
 from microsoft_tasks_mcp.auth.flow import (
     DEFAULT_AUTHORITY_TENANT,
     DEFAULT_CLIENT_ID,
@@ -54,6 +59,7 @@ CLIENT_ID_ENV = "TASKS_CLIENT_ID"
 TENANT_ENV = "TASKS_TENANT_ID"
 
 __all__ = [
+    "CONSUMER_TENANT_ID",
     "AuthRequiredError",
     "AuthorizationDeniedError",
     "CachedToken",
@@ -63,6 +69,8 @@ __all__ = [
     "RefreshTokenInvalidError",
     "get_token",
     "interactive_login",
+    "is_personal_account",
+    "signed_in_account_type",
 ]
 
 
