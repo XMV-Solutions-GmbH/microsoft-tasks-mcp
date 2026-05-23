@@ -12,12 +12,24 @@ Tracked in [GitHub Issues](https://github.com/XMV-Solutions-GmbH/microsoft-tasks
 
 ### Added
 
-- **Personal Microsoft accounts supported for the To Do half.** The XMV-hosted Entra app's `signInAudience` was widened from `AzureADMultipleOrgs` to `AzureADandPersonalMicrosoftAccount`, and the default OAuth authority from `/organizations` to `/common`. Multi-tenant B2B is unaffected — `/common` is a superset of `/organizations`. The `todo_*` tools (Microsoft To Do) work on both account types. The `planner_*` tools refuse personal accounts client-side with a clear message since Planner requires an M365 Group (a work/school-only construct).
-- **`microsoft_tasks_mcp.auth.is_personal_account(token)`** + **`signed_in_account_type(token)`** — JWT-claims-based detectors. Returns `True` iff the token's `tid` matches the global consumer-tenant GUID.
+- **`account_type` parameter on the login surface** (CLI `--account-type` and MCP tool `tasks_login_begin`) with two values: `"personal"` (outlook.com / hotmail.com / live.com / msn.com — To Do works, Planner refuses) and `"work_or_school"` (M365 tenant accounts incl. B2B guests — both work). The MCP tool description and the `LoginAccountTypeRequiredError` message both carry an `AGENT_INSTRUCTIONS:` marker so MCP clients can pattern-match the elicit-the-user UX. Closes [#54](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues/54).
+- **`account_type_to_tenant(account_type)`** helper exported from `microsoft_tasks_mcp.auth.flow` — maps `"personal"`→`"consumers"`, `"work_or_school"`→`"organizations"`. Strict (`ValueError` on typo).
+- **`LoginAccountTypeRequiredError`** exception with a default agent-readable message naming both valid values and the Planner-needs-work/school caveat verbatim.
+- **Personal Microsoft accounts supported for the To Do half.** The XMV-hosted Entra app's `signInAudience` was widened from `AzureADMultipleOrgs` to `AzureADandPersonalMicrosoftAccount`. The `todo_*` tools (Microsoft To Do) work on both account types. The `planner_*` tools refuse personal accounts client-side with a clear message since Planner requires an M365 Group (a work/school-only construct).
+- **`microsoft_tasks_mcp.auth.is_personal_account(token)`** + **`signed_in_account_type(token)`** — detectors that recognise BOTH JWT-shape tokens with consumer `tid` AND Microsoft Graph opaque tokens (`EwBI…`/`EwBY…`) as personal.
 - **`server._guard_planner_account_type(profile)`** — runtime guard called from the top of every `planner_*` MCP-tool wrapper. Raises `PermissionError` with a message naming the `todo_*` alternative when the signed-in account is consumer.
-- **Harness profile `harness-personal`** — separate token cache + matching `MS_TASKS_HARNESS_PERSONAL_TOKEN_JSON` repo secret. `ci.yml` restores both caches; personal-account harness tests skip silently if the personal secret is absent.
+- **Harness profile `harness-personal`** — separate token cache + matching `MS_TASKS_HARNESS_PERSONAL_TOKEN_JSON` repo secret. `ci.yml` restores both caches; personal-account harness tests skip silently if the personal secret is absent. `scripts/renew-harness-token.sh` takes a profile arg (`harness` → `--account-type work_or_school`, `harness-personal` → `--account-type personal`) — no more env-var hacks.
 
 - **`tasks_changes_since(scope, max_results)`** — new MCP tool (closes #41). Polls Microsoft Graph for Planner tasks and diffs against an on-disk cursor, returning `{"added": [...], "modified": [...], "removed": [...], "cursor_advanced": bool}`. Three scope kinds: `{"kind": "plan", "plan_id": "..."}` (all tasks in one plan), `{"kind": "assigned_to_me"}` (tasks assigned to the signed-in user), `{"kind": "registry"}` (one GET per task id in the profile's task registry). Cursor file lives at `~/.cache/mcp-server-microsoft-tasks/<profile>/cursors.json` (mode 0o600), keyed by sha256 of the JSON-serialised scope. Writes are atomic (temp-file + rename). First call returns everything as `added`; subsequent calls return only what changed since the last poll. `last_modified_max` is monotonic — a stale Graph timestamp never rolls the cursor back.
+
+### Changed
+
+- **`is_personal_account()` recognises Microsoft Graph opaque tokens** (`EwBI…` / `EwBY…`) as personal. Pre-v0.6 it returned `False` for opaque tokens — that classified real personal MSA sign-ins as "work/school" and silently bypassed the `_guard_planner_account_type` runtime check. Fix: any non-empty non-3-segment access token is now treated as personal; empty strings and unparseable 3-segment tokens still default to work/school for malformed-input safety.
+- **Device Code authority routing**: `interactive_login` / `tasks_login_begin` now route via `/consumers` for personal accounts and `/organizations` for work/school. Microsoft Identity's `/common` was previously the default but returns the work/school landing page (`login.microsoft.com/device`) even for personal-capable apps — that page rejects personal MSAs. The new routing fixes personal-account sign-in end-to-end without requiring per-user env vars.
+
+### Deprecated
+
+- `TASKS_TENANT_ID` env var remains supported as a power-user / CI escape hatch but is no longer the recommended way to pick the Device Code authority. Use `--account-type` (CLI) or the `account_type` MCP-tool parameter instead.
 
 ## [v0.5.0] — 2026-05-12
 

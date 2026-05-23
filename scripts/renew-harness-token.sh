@@ -39,9 +39,11 @@ PROFILE="${1:-harness}"
 case "${PROFILE}" in
   harness)
     SECRET_NAME="MS_TASKS_HARNESS_TOKEN_JSON"
+    ACCOUNT_TYPE="work_or_school"
     ;;
   harness-personal)
     SECRET_NAME="MS_TASKS_HARNESS_PERSONAL_TOKEN_JSON"
+    ACCOUNT_TYPE="personal"
     ;;
   *)
     printf '\033[0;31mERROR: unknown profile %q.\033[0m\n' "${PROFILE}" >&2
@@ -77,16 +79,20 @@ if ! gh repo view "${REPO}" >/dev/null 2>&1; then
     exit 1
 fi
 
-blue ">> Step 1/3: Sign in via Microsoft Device Code flow (profile: ${PROFILE})"
-yellow "    A URL + code will be printed below; sign in with the matching account."
+blue ">> Step 1/3: Sign in via Microsoft Device Code flow (profile: ${PROFILE}, account_type: ${ACCOUNT_TYPE})"
+yellow "    A URL + code will be printed below; sign in with the matching ${ACCOUNT_TYPE} account."
 echo
 
 # Force the plain-file backend so we always know where the token lands.
 # We need TASKS_ALLOW_WRITES set so the consent step doesn't blow up;
 # the harness-personal profile is read-only in practice, but the env
 # validator runs before knowing which scopes are needed.
+# `--account-type` is per #54: routes to /consumers for personal MSAs
+# and /organizations for work/school. No more TASKS_TENANT_ID env-var hack.
 MS_TASKS_TOKEN_STORE=file TASKS_ALLOW_WRITES=false \
-    uv run mcp-server-microsoft-tasks login --profile "${PROFILE}"
+    uv run mcp-server-microsoft-tasks login \
+        --profile "${PROFILE}" \
+        --account-type "${ACCOUNT_TYPE}"
 
 if [[ ! -f "${TOKEN_PATH}" ]]; then
     red "ERROR: expected ${TOKEN_PATH} after login, but it is missing."

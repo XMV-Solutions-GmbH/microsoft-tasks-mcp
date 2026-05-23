@@ -22,7 +22,11 @@ calls: the MCP server does not pause to do interactive auth in the
 middle of a tool call.
 
 `TASKS_CLIENT_ID` and `TASKS_TENANT_ID` env vars override the bundled
-multi-tenant defaults — see `docs/app-concept.md` § Auth model.
+multi-tenant defaults — see `docs/app-concept.md` § Auth model. The
+preferred onboarding path since v0.6 (#54) is the
+`account_type="personal"|"work_or_school"` argument on
+`interactive_login` and `tasks_login_begin`; the env var stays as a
+power-user escape hatch.
 """
 
 from __future__ import annotations
@@ -40,13 +44,18 @@ from microsoft_tasks_mcp.auth.account_type import (
     signed_in_account_type,
 )
 from microsoft_tasks_mcp.auth.flow import (
+    ACCOUNT_TYPE_PERSONAL,
+    ACCOUNT_TYPE_WORK_OR_SCHOOL,
     DEFAULT_AUTHORITY_TENANT,
     DEFAULT_CLIENT_ID,
+    VALID_ACCOUNT_TYPES,
     AuthorizationDeniedError,
     DeviceCodeChallenge,
     DeviceCodeError,
     DeviceCodeExpiredError,
+    LoginAccountTypeRequiredError,
     RefreshTokenInvalidError,
+    account_type_to_tenant,
     poll_for_token,
     refresh_access_token,
     request_device_code,
@@ -59,14 +68,19 @@ CLIENT_ID_ENV = "TASKS_CLIENT_ID"
 TENANT_ENV = "TASKS_TENANT_ID"
 
 __all__ = [
+    "ACCOUNT_TYPE_PERSONAL",
+    "ACCOUNT_TYPE_WORK_OR_SCHOOL",
     "CONSUMER_TENANT_ID",
+    "VALID_ACCOUNT_TYPES",
     "AuthRequiredError",
     "AuthorizationDeniedError",
     "CachedToken",
     "DeviceCodeChallenge",
     "DeviceCodeError",
     "DeviceCodeExpiredError",
+    "LoginAccountTypeRequiredError",
     "RefreshTokenInvalidError",
+    "account_type_to_tenant",
     "get_token",
     "interactive_login",
     "is_personal_account",
@@ -108,6 +122,37 @@ def _resolve_tenant(tenant: str | None) -> str:
         return tenant
     env = os.environ.get(TENANT_ENV, "").strip()
     return env or DEFAULT_AUTHORITY_TENANT
+
+
+def _resolve_login_tenant(
+    account_type: str | None,
+    tenant: str | None,
+) -> str:
+    """Resolve the Microsoft Identity tenant path for a fresh Device
+    Code login (#54).
+
+    Precedence:
+
+    1. Explicit `tenant=...` — wins always (programmatic override).
+    2. `account_type=...` — mapped via `account_type_to_tenant`.
+    3. `TASKS_TENANT_ID` env var — legacy power-user escape hatch.
+    4. None of the above → raise `LoginAccountTypeRequiredError`.
+
+    Note this is `request_device_code`-specific: refresh-token paths
+    (silent `get_token`) use `_resolve_tenant` instead, which still
+    falls back to `DEFAULT_AUTHORITY_TENANT="common"`. The cache
+    already binds to an issuer, so `common` works fine for refresh —
+    only the INITIAL device-code request has the
+    `/common`-returns-wrong-URL problem.
+    """
+    if tenant:
+        return tenant
+    if account_type:
+        return account_type_to_tenant(account_type)
+    env = os.environ.get(TENANT_ENV, "").strip()
+    if env:
+        return env
+    raise LoginAccountTypeRequiredError
 
 
 def _has_desktop_session() -> bool:
@@ -236,6 +281,7 @@ def get_token(
 def interactive_login(
     profile: str = "default",
     *,
+    account_type: str | None = None,
     client_id: str | None = None,
     tenant: str | None = None,
     store: TokenStore | None = None,
@@ -244,10 +290,21 @@ def interactive_login(
 ) -> CachedToken:
     """Run the Device Code flow end-to-end. Blocks until completion.
 
+    `account_type` (#54) MUST be one of `"personal"` /
+    `"work_or_school"` unless `tenant=...` or the legacy
+    `TASKS_TENANT_ID` env var is set. The two values route to
+    Microsoft Identity's `/consumers` vs `/organizations` authority,
+    which determines which Device Code landing page Microsoft returns
+    (`/common` is intentionally avoided — it returns the work/school
+    landing page even for personal-account-capable apps, which then
+    rejects personal MSAs).
+
     On success: persists the issued tokens to `store` (or the
     auto-detected store) under `profile`, and returns the `CachedToken`.
 
     Raises:
+        LoginAccountTypeRequiredError: neither `account_type` nor
+            `tenant` nor `TASKS_TENANT_ID` provided.
         AuthorizationDeniedError: user refused the prompt.
         DeviceCodeExpiredError: device code expired before sign-in.
 
@@ -257,7 +314,7 @@ def interactive_login(
     `tasks_login_status` (Issue #6, not yet implemented).
     """
     resolved_client = _resolve_client_id(client_id)
-    resolved_tenant = _resolve_tenant(tenant)
+    resolved_tenant = _resolve_login_tenant(account_type, tenant)
     resolved_store = store if store is not None else get_token_store()
     resolved_prompt = prompt if prompt is not None else _default_prompt
     # TASKS_ALLOW_WRITES-aware: appends Tasks.ReadWrite only when truthy.

@@ -26,7 +26,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from microsoft_tasks_mcp.auth import get_token
+from microsoft_tasks_mcp.auth import get_token, is_personal_account
 from microsoft_tasks_mcp.auth.store import DEFAULT_CACHE_DIR
 
 HARNESS_PROFILE = "harness"
@@ -80,3 +80,24 @@ def test_token_cache_path_is_under_default_cache_dir() -> None:
     a stale location."""
     expected = Path.home() / ".cache" / "mcp-server-microsoft-tasks" / HARNESS_PROFILE
     assert (DEFAULT_CACHE_DIR / HARNESS_PROFILE) == expected
+
+
+@pytest.mark.skipif(
+    not _harness_token_present(),
+    reason="Harness profile token not cached (see test_auth_round_trip_to_me).",
+)
+def test_work_school_token_classified_as_work_or_school(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Symmetric to the personal-account harness: the work/school harness
+    token MUST decode as `work_or_school`, NOT personal (#54). Regression
+    guard for the detector — if the XMV harness tenant ever starts
+    issuing opaque tokens, this would catch it before the Planner
+    guards mis-fire."""
+    monkeypatch.setenv("MS_TASKS_TOKEN_STORE", "file")
+    token = get_token(profile=HARNESS_PROFILE)
+    assert is_personal_account(token) is False, (
+        "Harness work/school token was classified as personal — Microsoft "
+        "may have changed the work/school token format, or the harness "
+        "profile was signed in with the wrong account."
+    )
