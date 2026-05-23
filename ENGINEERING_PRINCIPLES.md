@@ -162,6 +162,18 @@ The agent's working machine has all credentials and tools it needs to test again
 
 Tests are runnable from the agent's machine, not exclusively from CI. CI is for repeatable verification of merged changes; the agent's local environment is for **iterative development of those changes in the first place**.
 
+**Testing is not CI's job.** Before any non-trivial push, run the relevant test layers locally — every human developer does this, and every AI agent must too. The local commands are project-specific (`make test`, `pytest`, `cargo test`, `go test`, `npm test`, …); what matters is that the agent runs them all before the push, not the spelling.
+
+Three reasons this is non-negotiable:
+
+1. **Speed of feedback.** A failing test that takes 30 seconds to surface locally takes 5–25 minutes via CI (queue + cold-start + sequential matrix + retries). Multiplied across the day, the difference is the difference between "ship a clean fix in one push" and "trial-and-error on green-checks-bingo via 8 force-pushes."
+2. **Cost of CI minutes.** Hosted runners (GitHub Actions, GitLab CI, your own self-hosted fleet) and metered AI-agent runtimes bill by the minute. Burning CI minutes to discover a typo a type-checker or linter would have caught locally is throwing money at avoidance of a 30-second discipline. The cost is real and metered; treat it as such.
+3. **CI as confirmation, not discovery.** When CI fails on a push, that should be a surprise — a regression in something local tests didn't cover, or an environment-specific issue (different OS, different language version, missing credentials the agent didn't have). CI catching an obvious local bug means the local test step was skipped, which is a discipline failure, not a CI feature.
+
+The push-without-local-test pattern is sometimes rationalised as "CI is fast enough" or "I trust the lint passes." Both are wrong: CI is slow at the granularity of iteration, and obvious bugs ship through lint constantly. **If running the test suite locally is painful, fix the dev-experience setup before the next feature commit** — it is paying off interest on the slowest part of the workflow.
+
+Special note for AI agents: the temptation to push-and-watch is high because watching feels like progress; it is not. Each iteration that goes through CI when it could have gone through a local test run costs the maintainer an order of magnitude more attention and time.
+
 ### Required in every App Concept
 
 Every project's App Concept (or equivalent product/architecture document) must include a **Testability** section that names all three layers explicitly:
@@ -199,7 +211,7 @@ When deriving an issue backlog from a concept document for an AI-driven project:
 
 ### Anti-patterns
 
-- Running tests **only** from CI. The AI gets no feedback loop. Provide local harness access on the agent's machine.
+- **Running tests only from CI.** The agent gets no feedback loop, every iteration burns billable CI minutes, and trivial bugs that a type-checker / unit-test runner / linter would have caught in 30 s instead waste 15+ minutes of queue-and-matrix CI time per push. CI is for confirmation, not discovery. Provide local harness access on the agent's machine and use it before every push.
 - Treating "integration" and "harness" as the same thing. They aren't. Mocks-at-boundary integration tests are valuable but they validate our assumptions, not the external API. Both layers exist for different reasons; you need both.
 - Letting feature tickets land before the harness layer works. The first time the code talks to the real system is the worst time to discover the auth flow is broken or the scope is wrong.
 - Using a powerful test account "because it's faster to set up." The harness account is least-privilege scoped to the sandbox, full stop. A leaked admin token from the agent's machine is not an acceptable failure mode.
