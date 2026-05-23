@@ -331,3 +331,66 @@ def test_login_account_type_required_error_accepts_custom_message() -> None:
     """Callers can override with profile-specific text; default stays the safe one."""
     custom = flow.LoginAccountTypeRequiredError("custom override text")
     assert str(custom) == "custom override text"
+
+
+# ---------------------------------------------------------------------
+# TASKS_ALLOW_EXTERNAL_WRITES (#57) — optional opt-in env var
+# ---------------------------------------------------------------------
+
+
+def test_external_writes_enabled_unset_returns_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The flag is opt-in; unset preserves the safe registry-guard default."""
+    monkeypatch.delenv(flow.ALLOW_EXTERNAL_WRITES_ENV, raising=False)
+    assert flow.external_writes_enabled() is False
+
+
+def test_external_writes_enabled_empty_returns_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty string is treated as unset (same as the outlook-mcp pattern)."""
+    monkeypatch.setenv(flow.ALLOW_EXTERNAL_WRITES_ENV, "")
+    assert flow.external_writes_enabled() is False
+
+
+@pytest.mark.parametrize("value", ["true", "True", "TRUE", " true "])
+def test_external_writes_enabled_true_case_and_whitespace(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv(flow.ALLOW_EXTERNAL_WRITES_ENV, value)
+    assert flow.external_writes_enabled() is True
+
+
+@pytest.mark.parametrize("value", ["false", "FALSE", " false "])
+def test_external_writes_enabled_false_case_and_whitespace(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv(flow.ALLOW_EXTERNAL_WRITES_ENV, value)
+    assert flow.external_writes_enabled() is False
+
+
+@pytest.mark.parametrize("value", ["1", "yes", "on", "0", "no", "garbage", "True_"])
+def test_external_writes_enabled_invalid_value_raises(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """Typos must raise loudly — silent fall-through to safe-off would
+    leave the operator wondering why their external writes still get
+    refused."""
+    monkeypatch.setenv(flow.ALLOW_EXTERNAL_WRITES_ENV, value)
+    with pytest.raises(flow.TasksConsentNotConfiguredError) as exc_info:
+        flow.external_writes_enabled()
+    # The error message names the env var, both valid values, and the
+    # cross-flag dependency on TASKS_ALLOW_WRITES.
+    msg = str(exc_info.value)
+    assert flow.ALLOW_EXTERNAL_WRITES_ENV in msg
+    assert '"true"' in msg
+    assert '"false"' in msg
+    assert flow.ALLOW_WRITES_ENV in msg  # the "requires writes" caveat
+
+
+def test_external_writes_env_var_constant_value() -> None:
+    """The literal env-var name is part of the public contract — tests
+    pin it because operators paste this string verbatim into .mcp.json
+    and the README documents it."""
+    assert flow.ALLOW_EXTERNAL_WRITES_ENV == "TASKS_ALLOW_EXTERNAL_WRITES"

@@ -15,10 +15,12 @@ from typing import Any
 import httpx
 
 from microsoft_tasks_mcp.auth import get_token
+from microsoft_tasks_mcp.auth.flow import external_writes_enabled
 from microsoft_tasks_mcp.task_registry import TaskRegistry
 from microsoft_tasks_mcp.tools._common import GRAPH_BASE, auth_headers
 from microsoft_tasks_mcp.tools._shape import todo_envelope
 from microsoft_tasks_mcp.tools._writes_common import (
+    ExternalListIdRequiredError,
     ExternallyModifiedError,
     require_owned_by_profile,
 )
@@ -35,6 +37,7 @@ def update_todo_task(
     due_date: str | None = None,
     status: str | None = None,
     importance: str | None = None,
+    list_id: str | None = None,
     profile: str = "default",
     http: httpx.Client | None = None,
     registry: TaskRegistry | None = None,
@@ -45,11 +48,21 @@ def update_todo_task(
     `"not_completed"`; under the hood, `"not_completed"` maps to
     Graph's `notStarted`.
 
+    `list_id` is OPTIONAL and only consulted when
+    `TASKS_ALLOW_EXTERNAL_WRITES=true` AND the task isn't in this
+    profile's registry — Microsoft Graph's To Do API requires the
+    list id in the URL, so the agent must supply it for external
+    tasks (discover via the `todo_lists` tool). When the task IS in
+    the registry, `list_id` is ignored (the registry's value is
+    authoritative).
+
     Refuses with `NotOwnedByProfileError` if `task_id` isn't in this
-    profile's registry. Refuses with `ExternallyModifiedError` if
-    Microsoft Graph rejects the write because the underlying task
-    changed since this profile last saw it (HTTP 412 Precondition
-    Failed via `If-Match`).
+    profile's registry AND `TASKS_ALLOW_EXTERNAL_WRITES` is unset/false.
+    Refuses with `ExternalListIdRequiredError` if external-writes is
+    on but no `list_id` was provided for an external task. Refuses
+    with `ExternallyModifiedError` if Microsoft Graph rejects the
+    write because the underlying task changed since this profile last
+    saw it (HTTP 412 Precondition Failed via `If-Match`).
     """
     if not task_id or not task_id.strip():
         raise ValueError("todo_task_update requires a non-empty task_id")
@@ -62,10 +75,12 @@ def update_todo_task(
 
     task_id_s = task_id.strip()
     reg = registry if registry is not None else TaskRegistry(profile)
+    allow_ext = external_writes_enabled()
     entry = require_owned_by_profile(
         registry=reg,
         graph_id=task_id_s,
         expected_source="todo",
+        allow_external=allow_ext,
     )
 
     payload: dict[str, Any] = {}
@@ -88,17 +103,38 @@ def update_todo_task(
             "(title / body / due_date / status / importance)",
         )
 
+    token = get_token(profile)
     headers: dict[str, str] = {
-        **auth_headers(get_token(profile)),
+        **auth_headers(token),
         "Content-Type": "application/json",
     }
-    if entry.etag:
-        headers["If-Match"] = entry.etag
 
     client = http if http is not None else httpx.Client(timeout=30.0)
     try:
+        if entry is not None:
+            # In-registry path: use cached list_id + etag.
+            target_list_id = entry.list_or_plan_id
+            cached_etag = entry.etag
+        else:
+            # External-writes path (TASKS_ALLOW_EXTERNAL_WRITES=true): the
+            # agent must supply list_id (Graph has no /me/todo/tasks/{id}
+            # shape). Fetch fresh @odata.etag for concurrent-write safety.
+            if not list_id or not list_id.strip():
+                raise ExternalListIdRequiredError(task_id_s)
+            target_list_id = list_id.strip()
+            get_resp = client.get(
+                f"{GRAPH_BASE}/me/todo/lists/{target_list_id}/tasks/{task_id_s}",
+                headers=auth_headers(token),
+            )
+            get_resp.raise_for_status()
+            get_payload = get_resp.json()
+            cached_etag = get_payload.get("@odata.etag") if isinstance(get_payload, dict) else None
+
+        if cached_etag:
+            headers["If-Match"] = cached_etag
+
         response = client.patch(
-            f"{GRAPH_BASE}/me/todo/lists/{entry.list_or_plan_id}/tasks/{task_id_s}",
+            f"{GRAPH_BASE}/me/todo/lists/{target_list_id}/tasks/{task_id_s}",
             headers=headers,
             json=payload,
         )
@@ -108,11 +144,14 @@ def update_todo_task(
         raw = response.json()
         if not isinstance(raw, dict):
             raise ValueError("todo_task_update: Graph returned a non-object response")
-        envelope = todo_envelope(raw, list_id=entry.list_or_plan_id)
+        envelope = todo_envelope(raw, list_id=target_list_id)
     finally:
         if http is None:
             client.close()
 
-    new_etag = envelope.get("etag") if isinstance(envelope.get("etag"), str) else None
-    reg.update_etag(task_id_s, new_etag)
+    # Only update the registry entry's etag when the task IS in the
+    # registry — external tasks don't get a synthetic entry.
+    if entry is not None:
+        new_etag = envelope.get("etag") if isinstance(envelope.get("etag"), str) else None
+        reg.update_etag(task_id_s, new_etag)
     return envelope

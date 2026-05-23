@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Tracked in [GitHub Issues](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues).
 
+## [v0.7.0] — 2026-05-23
+
+### Added
+
+- **`TASKS_ALLOW_EXTERNAL_WRITES`** opt-in env-var (closes [#57](https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues/57)). When set to `"true"` (in addition to `TASKS_ALLOW_WRITES=true`), the write tools (`*_task_update`, `*_task_complete`, `*_task_delete`, planner reference tools) act on tasks not in this MCP profile's registry too — useful for personal single-user setups where the operator is the only task author. The default (unset / `"false"`) preserves the strict registry guard. A fresh GET for `@odata.etag` happens before each external write so the `EXTERNALLY_MODIFIED` (412) guard still applies. Invalid values raise loudly at startup (no silent fall-through).
+- **`list_id` optional parameter on the To Do write tools** (`todo_task_update`, `todo_task_complete`, `todo_task_delete`). Only consulted when external-writes is enabled and the task isn't in the registry — Microsoft Graph's To Do API addresses tasks only via their containing list. Discover list ids via the `todo_lists` tool.
+- **`ExternalListIdRequiredError`** raised by the To Do write tools when `list_id` is required but not supplied. Error message names both the missing parameter and the discovery tool (`todo_lists`).
+- **`tasks_login_status` `available_flags` block** — the response now includes `writes_enabled`, `external_writes_enabled`, and an `available_flags` dict that lists every consent gate the agent might need to flip, with a one-line description. Naive MCP clients (Claude Code, Cursor, etc.) can discover the full opt-in surface in-band without consulting the README or `docs/app-concept.md`. Already-set flags surface as `"(already enabled)"`.
+- **Startup banner on stderr** — `mcp-server-microsoft-tasks <version> — writes=<bool> [ext-writes=true] profile=<name>` so MCP-client log windows show which consent gates are active at a glance.
+- **`NOT_OWNED_BY_PROFILE` error message names the opt-in** — the error a write tool raises when refusing an external task now mentions `TASKS_ALLOW_EXTERNAL_WRITES`, so an agent that hits the refusal can discover the unlock from the error alone.
+- **Write-tool MCP descriptions name both consent gates verbatim** — `TASKS_ALLOW_WRITES` and `TASKS_ALLOW_EXTERNAL_WRITES` are mentioned in every gated tool's MCP description, so a model reading the `tools/list` response can answer "what env vars control this tool?" without leaving the chat.
+- **Harness test `tests/harness/test_onboarding_naive_agent.py`** — three-phase deterministic "naive agent" scenario asserting that a brand-new MCP client can configure the server purely from tool descriptions and `tasks_login_status` output.
+
+### Changed
+
+- `require_owned_by_profile` in `_writes_common.py` gains an `allow_external` kwarg and a `TaskEntry | None` return type. With the kwarg `True`, a missing registry entry returns `None` instead of raising — the calling tool then fetches the current ETag from Graph for `If-Match`. With the kwarg `False` (default), behaviour is unchanged.
+
 ## [v0.6.0] — 2026-05-23
 
 ### Added

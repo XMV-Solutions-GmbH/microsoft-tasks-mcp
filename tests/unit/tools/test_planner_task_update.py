@@ -321,3 +321,60 @@ def test_omitted_recurrence_argument_does_not_send_recurrence_field(
         update_planner_task("T1", title="Y", registry=reg)
         sent = respx.calls.last.request.read().decode()
     assert "recurrence" not in sent
+
+
+# ---------------------------------------------------------------------
+# v0.7 (#57) — TASKS_ALLOW_EXTERNAL_WRITES path
+# ---------------------------------------------------------------------
+
+
+@respx.mock
+def test_external_write_fetches_fresh_etag_and_patches(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """External-writes on + task not in registry: planner_task_update
+    GETs the task first to learn @odata.etag, then PATCHes with that
+    in If-Match. Planner tasks are addressable by id alone — no
+    list_id parameter needed."""
+    monkeypatch.setenv("TASKS_ALLOW_EXTERNAL_WRITES", "true")
+    _patch_get_token(monkeypatch)
+    reg = TaskRegistry("default", base_dir=tmp_path)  # empty
+
+    respx.get(URL).respond(
+        json={
+            "id": "T1",
+            "title": "External",
+            "planId": "P1",
+            "percentComplete": 0,
+            "assignments": {},
+            "@odata.etag": 'W/"external"',
+        }
+    )
+    patch_route = respx.patch(URL).respond(
+        json={
+            "id": "T1",
+            "title": "Updated",
+            "planId": "P1",
+            "percentComplete": 0,
+            "assignments": {},
+            "@odata.etag": 'W/"after"',
+        }
+    )
+
+    out = update_planner_task("T1", title="Updated", registry=reg)
+    assert out["title"] == "Updated"
+    assert patch_route.calls.last.request.headers["If-Match"] == 'W/"external"'
+    # Registry not polluted.
+    assert reg.get("T1") is None
+
+
+def test_external_write_flag_off_still_refuses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without TASKS_ALLOW_EXTERNAL_WRITES, the registry guard fires
+    even on a planner task — the flag is the only unlock."""
+    monkeypatch.delenv("TASKS_ALLOW_EXTERNAL_WRITES", raising=False)
+    _patch_get_token(monkeypatch)
+    reg = TaskRegistry("default", base_dir=tmp_path)
+    with pytest.raises(NotOwnedByProfileError):
+        update_planner_task("T1", title="X", registry=reg)

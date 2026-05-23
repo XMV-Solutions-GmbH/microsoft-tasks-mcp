@@ -80,6 +80,15 @@ def _patched_get_token(monkeypatch: pytest.MonkeyPatch, store: _MemStore) -> Non
     )
 
 
+_ONBOARDING_KEYS = ("writes_enabled", "external_writes_enabled", "available_flags")
+
+
+def _without_onboarding(result: dict) -> dict:
+    """Strip the v0.7 (#57) onboarding block for the legacy exact-equality
+    assertions. The onboarding block is exercised separately below."""
+    return {k: v for k, v in result.items() if k not in _ONBOARDING_KEYS}
+
+
 # ---------------------------------------------------------------------
 # State 1 — `signed_in`: token in store, fresh / valid
 # ---------------------------------------------------------------------
@@ -94,7 +103,10 @@ def test_signed_in_when_token_present_and_me_returns_upn(
         json={"userPrincipalName": "anna@xmv.de"},
     )
     result = login_status(profile="default")
-    assert result == {"status": "signed_in", "signed_in_user_upn": "anna@xmv.de"}
+    assert _without_onboarding(result) == {
+        "status": "signed_in",
+        "signed_in_user_upn": "anna@xmv.de",
+    }
 
 
 @respx.mock
@@ -126,7 +138,7 @@ def test_signed_in_returns_signed_in_even_when_me_4xx(
     respx.get(ME_URL).respond(403, json={"error": {"code": "Forbidden"}})
 
     result = login_status(profile="default")
-    assert result == {"status": "signed_in", "signed_in_user_upn": None}
+    assert _without_onboarding(result) == {"status": "signed_in", "signed_in_user_upn": None}
 
 
 @respx.mock
@@ -140,7 +152,7 @@ def test_signed_in_returns_signed_in_when_me_payload_missing_upn_field(
     respx.get(ME_URL).respond(json={"id": "abc-123"})  # no userPrincipalName key
 
     result = login_status(profile="default")
-    assert result == {"status": "signed_in", "signed_in_user_upn": None}
+    assert _without_onboarding(result) == {"status": "signed_in", "signed_in_user_upn": None}
 
 
 @respx.mock
@@ -153,7 +165,7 @@ def test_signed_in_handles_me_returning_non_dict_payload(
     respx.get(ME_URL).respond(json=[])
 
     result = login_status(profile="default")
-    assert result == {"status": "signed_in", "signed_in_user_upn": None}
+    assert _without_onboarding(result) == {"status": "signed_in", "signed_in_user_upn": None}
 
 
 @respx.mock
@@ -167,7 +179,7 @@ def test_signed_in_handles_me_returning_non_string_upn(
     respx.get(ME_URL).respond(json={"userPrincipalName": None})
 
     result = login_status(profile="default")
-    assert result == {"status": "signed_in", "signed_in_user_upn": None}
+    assert _without_onboarding(result) == {"status": "signed_in", "signed_in_user_upn": None}
 
 
 def test_signed_in_uses_cached_upn_without_me_call(
@@ -182,7 +194,10 @@ def test_signed_in_uses_cached_upn_without_me_call(
     with respx.mock(base_url="https://graph.microsoft.com") as router:
         result = login_status(profile="default")
         assert not router.calls
-    assert result == {"status": "signed_in", "signed_in_user_upn": "pre-cached@xmv.de"}
+    assert _without_onboarding(result) == {
+        "status": "signed_in",
+        "signed_in_user_upn": "pre-cached@xmv.de",
+    }
 
 
 # ---------------------------------------------------------------------
@@ -257,7 +272,7 @@ def test_pending_overrides_a_stale_token_probe_only_via_priority_order(
 def test_none_when_no_token_and_no_session(monkeypatch: pytest.MonkeyPatch) -> None:
     _patched_get_token(monkeypatch, _MemStore())
     result = login_status(profile="default")
-    assert result == {"status": "none"}
+    assert _without_onboarding(result) == {"status": "none"}
 
 
 # ---------------------------------------------------------------------
@@ -331,7 +346,7 @@ def test_profile_isolation(monkeypatch: pytest.MonkeyPatch) -> None:
     result_a = login_status(profile="profile-a")
     result_b = login_status(profile="profile-b")
     assert result_a["status"] == "pending"
-    assert result_b == {"status": "none"}
+    assert _without_onboarding(result_b) == {"status": "none"}
 
 
 # ---------------------------------------------------------------------
@@ -360,3 +375,95 @@ def test_me_call_passes_select_query_param(
     route = respx.get(ME_URL).respond(json={"userPrincipalName": "x@x.de"})
     login_status(profile="default")
     assert "%24select=userPrincipalName" in str(route.calls.last.request.url)
+
+
+# ---------------------------------------------------------------------
+# v0.7 (#57) onboarding block — available_flags + writes_enabled +
+# external_writes_enabled. Always present, in all three states.
+# ---------------------------------------------------------------------
+
+
+@respx.mock
+def test_onboarding_block_present_when_signed_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A naive MCP client must be able to discover the consent gates
+    in-band — `available_flags` is the discovery surface."""
+    monkeypatch.delenv("TASKS_ALLOW_WRITES", raising=False)
+    monkeypatch.delenv("TASKS_ALLOW_EXTERNAL_WRITES", raising=False)
+    _patched_get_token(monkeypatch, _MemStore(token=_fresh_token()))
+    respx.get(ME_URL).respond(json={"userPrincipalName": "x@x.de"})
+
+    result = login_status(profile="default")
+
+    assert result["writes_enabled"] is False
+    assert result["external_writes_enabled"] is False
+    flags = result["available_flags"]
+    assert "TASKS_ALLOW_WRITES" in flags
+    assert "TASKS_ALLOW_EXTERNAL_WRITES" in flags
+    # Each description names the env var that's relevant for opting in.
+    assert "true" in flags["TASKS_ALLOW_WRITES"].lower()
+    assert "TASKS_ALLOW_WRITES=true" in flags["TASKS_ALLOW_EXTERNAL_WRITES"]
+
+
+def test_onboarding_block_present_when_no_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Even on a cold start (no token, no session), the onboarding block
+    appears — the agent reads it before sign-in to know what env to set."""
+    monkeypatch.delenv("TASKS_ALLOW_WRITES", raising=False)
+    monkeypatch.delenv("TASKS_ALLOW_EXTERNAL_WRITES", raising=False)
+    _patched_get_token(monkeypatch, _MemStore())  # empty store
+
+    result = login_status(profile="default")
+    assert result["status"] == "none"
+    assert result["writes_enabled"] is False
+    assert "available_flags" in result
+
+
+def test_onboarding_block_writes_enabled_marks_writes_already_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When TASKS_ALLOW_WRITES=true is already in env, the description
+    flips to '(already enabled)' so the agent doesn't tell the user to
+    set what's already set. TASKS_ALLOW_EXTERNAL_WRITES still describes
+    the unlock so the agent can discover the next step."""
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "true")
+    monkeypatch.delenv("TASKS_ALLOW_EXTERNAL_WRITES", raising=False)
+    _patched_get_token(monkeypatch, _MemStore())
+
+    result = login_status(profile="default")
+    flags = result["available_flags"]
+    assert result["writes_enabled"] is True
+    assert flags["TASKS_ALLOW_WRITES"] == "(already enabled)"
+    assert "true" in flags["TASKS_ALLOW_EXTERNAL_WRITES"].lower()
+
+
+def test_onboarding_block_both_enabled_both_marked_already_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Full opt-in: both flags surface as '(already enabled)'."""
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "true")
+    monkeypatch.setenv("TASKS_ALLOW_EXTERNAL_WRITES", "true")
+    _patched_get_token(monkeypatch, _MemStore())
+
+    result = login_status(profile="default")
+    assert result["external_writes_enabled"] is True
+    flags = result["available_flags"]
+    assert flags["TASKS_ALLOW_WRITES"] == "(already enabled)"
+    assert flags["TASKS_ALLOW_EXTERNAL_WRITES"] == "(already enabled)"
+
+
+def test_onboarding_block_degrades_on_consent_misconfig(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A misconfigured TASKS_ALLOW_WRITES (e.g. value="yes") would raise
+    TasksConsentNotConfiguredError in the strict parser. The status
+    tool must NOT propagate that — the whole point of the status tool
+    is to be the discovery surface even when consent is broken."""
+    monkeypatch.setenv("TASKS_ALLOW_WRITES", "yes")  # invalid value
+    _patched_get_token(monkeypatch, _MemStore())
+
+    result = login_status(profile="default")
+    assert result["writes_enabled"] is False  # degraded, no raise
+    assert "available_flags" in result

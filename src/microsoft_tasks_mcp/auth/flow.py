@@ -78,6 +78,17 @@ ALLOW_WRITES_ENV = "TASKS_ALLOW_WRITES"
 _STRICT_TRUE = "true"
 _STRICT_FALSE = "false"
 
+# Env flag that opts the running MCP server into letting the write tools
+# act on tasks NOT created by this MCP profile (#57). Default behaviour
+# (unset / "false") preserves the per-profile-registry guard — write
+# tools refuse with NOT_OWNED_BY_PROFILE for anything they didn't create.
+# When set to "true" AND TASKS_ALLOW_WRITES=true, the registry guard
+# becomes advisory: a missing entry no longer blocks the write, and the
+# tool fetches the current ETag from Graph for concurrent-write safety.
+# Use case: personal single-user setups where the operator is the only
+# task author, and the registry is friction rather than safety.
+ALLOW_EXTERNAL_WRITES_ENV = "TASKS_ALLOW_EXTERNAL_WRITES"
+
 # Env flag that opts the running MCP server out of Planner support
 # entirely. When truthy: Group.Read.All is dropped from the OAuth scope
 # request (so a non-admin tenant's user can complete sign-in without
@@ -192,10 +203,52 @@ def _strict_bool_env(name: str) -> bool:
     raise TasksConsentNotConfiguredError(_consent_help_text(name, raw))
 
 
+def _optional_strict_bool_env(name: str) -> bool:
+    """Read an OPTIONAL boolean env var.
+
+    Same strict accept-only-"true"/"false" parser as `_strict_bool_env`,
+    but unset / empty returns `False` instead of raising. Typos still
+    raise — we want `TASKS_ALLOW_EXTERNAL_WRITES=yes` to fail loudly,
+    not silently default to safe-off and leave the operator wondering
+    why their writes still get refused.
+
+    Used for opt-in extension flags (#57) that default to safe-off
+    behaviour; existing installs that don't set the flag keep their
+    behaviour unchanged.
+    """
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return False
+    normalised = raw.strip().lower()
+    if normalised == _STRICT_TRUE:
+        return True
+    if normalised == _STRICT_FALSE:
+        return False
+    raise TasksConsentNotConfiguredError(_consent_help_text(name, raw))
+
+
 def _consent_help_text(name: str, raw: str | None) -> str:
     """Format the onboarding-help message for an unset / invalid
-    consent env var."""
+    consent env var. Branches per env-var name so each carries the
+    documentation relevant to its own decision."""
     got = "(not set)" if raw is None else f"{raw!r}"
+    if name == ALLOW_EXTERNAL_WRITES_ENV:
+        return (
+            f"ERROR: mcp-server-microsoft-tasks got an invalid "
+            f"{ALLOW_EXTERNAL_WRITES_ENV} value ({got}).\n\n"
+            f"This optional flag lets the write tools (`*_task_update`, "
+            f"`*_task_complete`, `*_task_delete`, planner reference "
+            f"tools) act on tasks NOT created by this MCP profile. "
+            f"Useful for personal single-user setups where the operator "
+            f"is the only task author. Default behaviour (unset) "
+            f"preserves the strict per-profile-registry guard.\n\n"
+            f"Valid values:\n\n"
+            f'  "{ALLOW_EXTERNAL_WRITES_ENV}": "true"   — allow writes on external tasks\n'
+            f'  "{ALLOW_EXTERNAL_WRITES_ENV}": "false"  — registry guard stays (the safe default)\n'
+            f"  (unset)                                — same as false\n\n"
+            f"Requires {ALLOW_WRITES_ENV}=true; on its own this flag has no effect.\n\n"
+            f"See README §Authentication for the design rationale."
+        )
     return (
         f"ERROR: mcp-server-microsoft-tasks requires an explicit "
         f"{ALLOW_WRITES_ENV} decision (got {got}).\n\n"
@@ -241,6 +294,23 @@ def writes_enabled() -> bool:
     for the user-side rationale of the same pattern.
     """
     return validate_consent_config()
+
+
+def external_writes_enabled() -> bool:
+    """True iff `TASKS_ALLOW_EXTERNAL_WRITES=true` (#57).
+
+    Optional flag: unset / "false" returns `False` (the safe default —
+    the registry guard stays in place). Anything other than exactly
+    `"true"` / `"false"` raises `TasksConsentNotConfiguredError` with
+    a loud onboarding-help message, never silently degrades.
+
+    This flag is meaningful only when `TASKS_ALLOW_WRITES=true` —
+    write tools aren't registered without writes enabled, so the
+    external-writes bypass is unreachable. We don't enforce that
+    pairing here at parse time because the natural failure mode (no
+    write tools available) is itself the signal.
+    """
+    return _optional_strict_bool_env(ALLOW_EXTERNAL_WRITES_ENV)
 
 
 def planner_disabled() -> bool:
@@ -298,6 +368,7 @@ DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
 __all__ = [
     "ACCOUNT_TYPE_PERSONAL",
     "ACCOUNT_TYPE_WORK_OR_SCHOOL",
+    "ALLOW_EXTERNAL_WRITES_ENV",
     "ALLOW_WRITES_ENV",
     "AUTHORITY_BASE",
     "DEFAULT_AUTHORITY_TENANT",
@@ -315,6 +386,7 @@ __all__ = [
     "RefreshTokenInvalidError",
     "TasksConsentNotConfiguredError",
     "account_type_to_tenant",
+    "external_writes_enabled",
     "planner_disabled",
     "poll_for_token",
     "refresh_access_token",

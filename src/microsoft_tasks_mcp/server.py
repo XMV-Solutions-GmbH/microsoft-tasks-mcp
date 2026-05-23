@@ -28,9 +28,11 @@ from typing import Any
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
+from microsoft_tasks_mcp import __version__
 from microsoft_tasks_mcp.auth import get_token, is_personal_account
 from microsoft_tasks_mcp.auth.flow import (
     TasksConsentNotConfiguredError,
+    external_writes_enabled,
     planner_disabled,
     validate_consent_config,
 )
@@ -569,6 +571,14 @@ def register_planner_read_tools(mcp_instance: FastMCP) -> None:
         )
 
 
+_CONSENT_GATE_NOTE = (
+    " Enabled when TASKS_ALLOW_WRITES=true. Set "
+    "TASKS_ALLOW_EXTERNAL_WRITES=true to also act on tasks NOT created "
+    "by this MCP profile (e.g. tasks the user typed manually in the "
+    "To Do app); default behaviour refuses with NOT_OWNED_BY_PROFILE."
+)
+
+
 def register_write_tools(mcp_instance: FastMCP) -> None:
     """Register the v0.2 write tools (gated on `TASKS_ALLOW_WRITES=true`).
 
@@ -652,7 +662,10 @@ def register_write_tools(mcp_instance: FastMCP) -> None:
             "the agent last saw it (412 Precondition Failed via "
             "`If-Match` ETag header). `status` accepts the unified "
             "envelope values `'completed'` / `'not_completed'`. "
-            "Returns the updated task's envelope."
+            "Pass `list_id` only when acting on a task NOT in this "
+            "profile's registry (requires "
+            "TASKS_ALLOW_EXTERNAL_WRITES=true; discover via "
+            "`todo_lists`). Returns the updated task's envelope." + _CONSENT_GATE_NOTE
         ),
     )
     def todo_task_update(
@@ -662,6 +675,7 @@ def register_write_tools(mcp_instance: FastMCP) -> None:
         due_date: str | None = None,
         status: str | None = None,
         importance: str | None = None,
+        list_id: str | None = None,
     ) -> dict[str, Any]:
         return _do_todo_task_update(
             task_id,
@@ -670,6 +684,7 @@ def register_write_tools(mcp_instance: FastMCP) -> None:
             due_date=due_date,
             status=status,
             importance=importance,
+            list_id=list_id,
             profile=_get_profile(),
         )
 
@@ -685,11 +700,21 @@ def register_write_tools(mcp_instance: FastMCP) -> None:
             "Mark a Microsoft To Do task this MCP profile created as "
             "completed. Convenience wrapper around `todo_task_update` "
             "with `status='completed'`. Same NOT_OWNED_BY_PROFILE / "
-            "EXTERNALLY_MODIFIED guards apply."
+            "EXTERNALLY_MODIFIED guards apply. Pass `list_id` only "
+            "when acting on a task NOT in this profile's registry "
+            "(requires TASKS_ALLOW_EXTERNAL_WRITES=true; discover via "
+            "`todo_lists`)." + _CONSENT_GATE_NOTE
         ),
     )
-    def todo_task_complete(task_id: str) -> dict[str, Any]:
-        return _do_todo_task_complete(task_id, profile=_get_profile())
+    def todo_task_complete(
+        task_id: str,
+        list_id: str | None = None,
+    ) -> dict[str, Any]:
+        return _do_todo_task_complete(
+            task_id,
+            list_id=list_id,
+            profile=_get_profile(),
+        )
 
     @mcp_instance.tool(
         annotations=ToolAnnotations(
@@ -705,11 +730,21 @@ def register_write_tools(mcp_instance: FastMCP) -> None:
             "profile's registry — hand-typed tasks in To Do are "
             "off-limits. Idempotent: re-deleting a task already gone "
             "server-side is a silent no-op (registry entry is "
-            "cleaned up either way). Returns no value on success."
+            "cleaned up either way). Pass `list_id` only when "
+            "deleting a task NOT in this profile's registry (requires "
+            "TASKS_ALLOW_EXTERNAL_WRITES=true; discover via "
+            "`todo_lists`). Returns no value on success." + _CONSENT_GATE_NOTE
         ),
     )
-    def todo_task_delete(task_id: str) -> None:
-        _do_todo_task_delete(task_id, profile=_get_profile())
+    def todo_task_delete(
+        task_id: str,
+        list_id: str | None = None,
+    ) -> None:
+        _do_todo_task_delete(
+            task_id,
+            list_id=list_id,
+            profile=_get_profile(),
+        )
 
 
 def register_planner_write_tools(mcp_instance: FastMCP) -> None:
@@ -788,7 +823,7 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
             "`MS_TASKS_PLANNER_BETA=true`. To cancel an existing "
             'series, pass `recurrence={"schedule": null}` (Graph '
             "rejects null on the top-level field). Returns the updated "
-            "task's envelope."
+            "task's envelope." + _CONSENT_GATE_NOTE
         ),
     )
     def planner_task_update(
@@ -832,7 +867,7 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
             "Mark a Microsoft Planner task this MCP profile created "
             "as completed. Convenience wrapper around "
             "`planner_task_update` with `status='completed'`. Same "
-            "NOT_OWNED_BY_PROFILE / EXTERNALLY_MODIFIED guards apply."
+            "NOT_OWNED_BY_PROFILE / EXTERNALLY_MODIFIED guards apply." + _CONSENT_GATE_NOTE
         ),
     )
     def planner_task_complete(task_id: str) -> dict[str, Any]:
@@ -852,7 +887,7 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
             "**Refuses** (NOT_OWNED_BY_PROFILE) if not in the "
             "profile's registry. Idempotent: re-deleting a task "
             "already gone server-side is a silent no-op. Returns no "
-            "value on success."
+            "value on success." + _CONSENT_GATE_NOTE
         ),
     )
     def planner_task_delete(task_id: str) -> None:
@@ -879,7 +914,7 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
             "is a Microsoft-classified type string (`'Word'`, "
             "`'Excel'`, `'PowerPoint'`, `'PDF'`, `'Other'` are common "
             "values; Graph accepts any string). Returns the unified "
-            "task envelope plus the full `references` list."
+            "task envelope plus the full `references` list." + _CONSENT_GATE_NOTE
         ),
     )
     def planner_task_add_reference(
@@ -913,7 +948,7 @@ def register_planner_write_tools(mcp_instance: FastMCP) -> None:
             "`task_id` is not in the profile's registry. Surfaces "
             "EXTERNALLY_MODIFIED on a details-ETag mismatch. Returns "
             "the unified task envelope plus the refreshed "
-            "`references` list."
+            "`references` list." + _CONSENT_GATE_NOTE
         ),
     )
     def planner_task_remove_reference(task_id: str, url: str) -> dict[str, Any]:
@@ -935,6 +970,7 @@ def _build_server() -> FastMCP:
     the operator sees it on stderr; no silent read-only fallback.
     """
     writes = validate_consent_config()
+    ext_writes = external_writes_enabled() if writes else False
     log = logging.getLogger("microsoft-tasks-mcp")
     server = FastMCP("mcp-server-microsoft-tasks")
     register_login_tools(server)
@@ -951,7 +987,29 @@ def _build_server() -> FastMCP:
         register_write_tools(server)
         if not planner_disabled():
             register_planner_write_tools(server)
+    _emit_startup_banner(writes=writes, ext_writes=ext_writes)
     return server
+
+
+def _emit_startup_banner(*, writes: bool, ext_writes: bool) -> None:
+    """Print a one-line startup line to stderr so MCP-client log windows
+    show — at a glance — which consent gates are active.
+
+    Format: `mcp-server-microsoft-tasks <version> — writes=<bool> [ext-writes=true] profile=<name>`
+
+    `ext-writes=true` is emitted only when the flag is active (default-off
+    so the common case stays compact). #57.
+    """
+    parts = [
+        f"mcp-server-microsoft-tasks {__version__}",
+        "—",
+        f"writes={'true' if writes else 'false'}",
+    ]
+    if ext_writes:
+        parts.append("ext-writes=true")
+    parts.append(f"profile={_get_profile()}")
+    sys.stderr.write(" ".join(parts) + "\n")
+    sys.stderr.flush()
 
 
 # Build at module-import time so MCP-client launchers (uvx, etc.)

@@ -33,12 +33,72 @@ import httpx
 from mcp_microsoft_graph_auth import public_view
 
 from microsoft_tasks_mcp.auth import AuthRequiredError, get_token
+from microsoft_tasks_mcp.auth.flow import (
+    ALLOW_EXTERNAL_WRITES_ENV,
+    ALLOW_WRITES_ENV,
+    TasksConsentNotConfiguredError,
+    external_writes_enabled,
+    writes_enabled,
+)
 from microsoft_tasks_mcp.login_state import (
     cache_upn,
     cached_upn,
     get_login_session_registry,
 )
 from microsoft_tasks_mcp.tools._common import GRAPH_BASE, auth_headers
+
+
+def _available_flags(*, writes_on: bool, ext_writes_on: bool) -> dict[str, str]:
+    """Onboarding block: list every consent gate the agent might need to
+    flip, with a one-line description. Content adapts based on which
+    flags are already on so the agent doesn't get told to set something
+    that's already set.
+
+    Always present in the `tasks_status` response so a naive MCP client
+    that has never seen the docs can discover the full opt-in surface
+    in-band, without round-tripping to README or app-concept.md.
+    """
+    if writes_on:
+        writes_line = "(already enabled)"
+    else:
+        writes_line = (
+            "Set to 'true' to enable task creation, update, completion, "
+            "and deletion. Adds Tasks.ReadWrite to the OAuth scope "
+            "(operator must consent at next sign-in)."
+        )
+    if ext_writes_on:
+        ext_writes_line = "(already enabled)"
+    else:
+        ext_writes_line = (
+            f"Set to 'true' (requires {ALLOW_WRITES_ENV}=true) to allow "
+            f"the write tools to act on tasks NOT created by this MCP "
+            f"profile (e.g. tasks the user typed manually in the To Do "
+            f"app). Default behaviour refuses with NOT_OWNED_BY_PROFILE."
+        )
+    return {
+        ALLOW_WRITES_ENV: writes_line,
+        ALLOW_EXTERNAL_WRITES_ENV: ext_writes_line,
+    }
+
+
+def _consent_state() -> tuple[bool, bool]:
+    """Resolve (writes_enabled, external_writes_enabled) without raising.
+
+    The strict env-var parsers raise `TasksConsentNotConfiguredError`
+    when unset or invalid; for the status response we degrade those to
+    `False` so the response stays useful as the discovery surface even
+    on a half-configured install. The agent reads `available_flags` to
+    figure out what to set next.
+    """
+    try:
+        writes_on = writes_enabled()
+    except TasksConsentNotConfiguredError:
+        writes_on = False
+    try:
+        ext_writes_on = external_writes_enabled()
+    except TasksConsentNotConfiguredError:
+        ext_writes_on = False
+    return writes_on, ext_writes_on
 
 
 def login_status(
@@ -60,6 +120,13 @@ def login_status(
     except AuthRequiredError:
         token = None
 
+    writes_on, ext_writes_on = _consent_state()
+    onboarding: dict[str, Any] = {
+        "writes_enabled": writes_on,
+        "external_writes_enabled": ext_writes_on,
+        "available_flags": _available_flags(writes_on=writes_on, ext_writes_on=ext_writes_on),
+    }
+
     if token is not None:
         upn = cached_upn(profile)
         if upn is None:
@@ -69,13 +136,14 @@ def login_status(
         return {
             "status": "signed_in",
             "signed_in_user_upn": upn,
+            **onboarding,
         }
 
     # 2. No token. Check the in-process LoginSessionRegistry.
     registry = get_login_session_registry()
     session = registry.get(profile)
     if session is None:
-        return {"status": "none"}
+        return {"status": "none", **onboarding}
 
     view = public_view(session, now=datetime.now(UTC))
 
@@ -88,6 +156,7 @@ def login_status(
             "verification_url_complete": view["verification_url_complete"],
             "expires_at": view["expires_at"],
             "time_remaining_s": view["time_remaining_s"],
+            **onboarding,
         }
 
     # Terminal states: failed / expired / cancelled. (success is
@@ -108,6 +177,7 @@ def login_status(
         "status": "none",
         "previous_session_status": session.status,
         "error": error,
+        **onboarding,
     }
 
 

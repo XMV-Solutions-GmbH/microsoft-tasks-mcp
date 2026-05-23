@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 
 from microsoft_tasks_mcp.auth import get_token
+from microsoft_tasks_mcp.auth.flow import external_writes_enabled
 from microsoft_tasks_mcp.task_registry import TaskRegistry
 from microsoft_tasks_mcp.tools._common import (
     auth_headers,
@@ -55,10 +56,12 @@ def remove_planner_task_reference(
 
     task_id_s = task_id.strip()
     reg = registry if registry is not None else TaskRegistry(profile)
-    require_owned_by_profile(
+    allow_ext = external_writes_enabled()
+    registry_entry = require_owned_by_profile(
         registry=reg,
         graph_id=task_id_s,
         expected_source="planner",
+        allow_external=allow_ext,
     )
 
     new_task_etag: str | None = None
@@ -117,6 +120,6 @@ def remove_planner_task_reference(
         if http is None:
             client.close()
 
-    if new_task_etag is not None:
+    if registry_entry is not None and new_task_etag is not None:
         reg.update_etag(task_id_s, new_task_etag)
     return envelope
