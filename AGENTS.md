@@ -1,170 +1,102 @@
 <!--
-SPDX-License-Identifier: MIT OR Apache-2.0
+SPDX-License-Identifier: LicenseRef-XMV-Proprietary
 SPDX-FileCopyrightText: 2026 XMV Solutions GmbH
 SPDX-FileContributor: David Koller <david.koller@xmv.de>
 -->
 
-# AGENTS.md — brief for AI coding agents
+# AGENTS.md — canonical brief for AI coding agents
 
-This is the canonical, tool-agnostic brief for AI agents working in this repo. Codex, Claude Code, GitHub Copilot, Cursor, Aider, and every other coding agent read this same file. The tool-specific files at the conventional locations (`CLAUDE.md`, `.github/copilot-instructions.md`) are five-line pointers back here — don't expect content there.
+This is the tool-agnostic brief for AI agents working in this repo. Claude Code, Codex, GitHub Copilot, Cursor, Aider — every coding agent reads this same file. The tool-specific files at conventional locations (`CLAUDE.md`, `.github/copilot-instructions.md`, `.cursor/rules/*.mdc`, `CONVENTIONS.md`) are one-line pointers back here; do not expect content there.
+
+This file is **project-agnostic**. Identical across every repo. Anything project-specific (tech stack, tracker URL, environment hostnames, mailbox addresses, repo or subproject map, overrides of the engineering baseline) lives in `PROJECT_SPECIFICS.md` — read that next if it exists.
 
 ## Reading order
 
-1. **This file** — what you're reading. AI-specific behaviour for this repo, plus project-specific facts (tech stack, overrides, header values).
-2. **[`ENGINEERING_PRINCIPLES.md`](ENGINEERING_PRINCIPLES.md)** — XMV's project-agnostic engineering baseline. Same in every XMV OSS project. Read it in full: language, status workflow, three test layers, source-control rules, CI vigilance, doc-mirrors-repo, source-of-truth, PR discipline, licensing.
-3. **[`README.md`](README.md)** — what this project is, for an end user.
-4. **[`docs/app-concept.md`](docs/app-concept.md)** — the product/architecture/scope spec.
+**MANDATORY — at the very start of every session, before responding to anything, read items 1 and 2 below in full. Do this unconditionally, regardless of what the operator asks. Do not assume you already know their contents from a prior session.**
 
-Anything that applies to **humans too** lives in `ENGINEERING_PRINCIPLES.md`, not here. This file is for the failure modes and operational rules that are specific to AI agents.
+1. **[`ENGINEERING_PRINCIPLES.md`](ENGINEERING_PRINCIPLES.md)** — XMV's project-agnostic engineering baseline. Language, status workflow, three test layers, source-control rules, CI vigilance, doc-mirrors-repo, source-of-truth, PR discipline, licensing. Read in full.
+2. **[`PROJECT_MANAGEMENT_PRINCIPLES.md`](PROJECT_MANAGEMENT_PRINCIPLES.md)** — XMV's project-agnostic coordination baseline. Orchestrator role, contributor briefs, serialised merges, escalation, lessons-learned, communication brevity. Read in full.
+3. **This file** — what you're reading. AI-specific behaviour rules that apply to every repo.
+4. **[`PROJECT_SPECIFICS.md`](PROJECT_SPECIFICS.md)** *(optional — read if present)* — project-specific facts and overrides for this repo. If the file does not exist, the project has no project-specific content beyond what the principle files cover.
+5. **[`README.md`](README.md)** and any documents referenced from `PROJECT_SPECIFICS.md` (typically `docs/app-concept.md`, `docs/architecture.md`, `docs/testconcept.md`).
 
----
-
-## Project facts
-
-> **Template note.** Replace the `<PLACEHOLDER>` values in this section once the new repo has its first PR or first published release.
-
-### What this repo is
-
-`mcp-server-microsoft-tasks` — an MCP server that wraps Microsoft Planner + Microsoft To Do (the Microsoft Tasks family) so AI coding agents can read, search, and **carefully** create tasks across both surfaces, **without ever modifying tasks the agent did not create itself**.
-
-Full vision, tool surface, auth model, and conflict semantics in [`docs/app-concept.md`](docs/app-concept.md). Read it before changing anything that touches the public surface — especially anything tied to the per-profile registry or the `TASKS_ALLOW_WRITES` opt-in.
-
-### Project-specific docs
-
-| Doc | Purpose |
-|---|---|
-| [`docs/app-concept.md`](docs/app-concept.md) | Vision, MVP scope, public surface, Testability section, open questions |
-| [`docs/testconcept.md`](docs/testconcept.md) | Per-project instantiation of the three test layers (unit / integration / harness) |
-| [`docs/proposals/`](docs/proposals/) | RFCs / spike notes / architectural decisions too big for a single issue |
-| [`docs/markdown-style.md`](docs/markdown-style.md) | Markdown linting rules — read only when producing or editing Markdown |
-| [`README.md`](README.md) | Quickstart for end users |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution flow |
-| [`SECURITY.md`](SECURITY.md) | Vulnerability disclosure |
-| [`CHANGELOG.md`](CHANGELOG.md) | Keep-a-changelog history |
-
-### Tracker
-
-**GitHub Issues + the repo-bound GitHub Project** at <https://github.com/XMV-Solutions-GmbH/microsoft-tasks-mcp/issues>. See [`ENGINEERING_PRINCIPLES.md` § 2](ENGINEERING_PRINCIPLES.md). No `docs/todo.md` or other markdown TODO files.
-
-Recommended labels: `type:feat` / `type:fix` / `type:chore` / `type:docs` / `type:test`; `area:<component>`; `priority:p0` / `p1` / `p2`. Add `agent:<tool-name>` (e.g. `agent:claude`, `agent:codex`) when an AI agent is the executor.
-
-Issue body convention: `## Context`, `## Acceptance criteria` (checkbox list), `## Out of scope`, `## Links`. Milestones map to releases (`v0.1.0 — MVP`, `v0.2.0`, …).
-
-### Tech stack
-
-- **Python 3.11+**, packaged for `uvx` / `pipx` install.
-- **MCP Python SDK** (`mcp[cli]`) with FastMCP for the protocol layer.
-- **`mcp-microsoft-graph-auth`** (sister library on PyPI) for the Device Code flow, token store, login session registry, public-view shape. Same auth primitives as `mcp-server-sharepoint` and `mcp-server-outlook`.
-- **`httpx`** for raw Microsoft Graph calls.
-- **Tests**: `pytest` + `pytest-asyncio` + `respx` for HTTP boundary mocks; harness layer hits the real Microsoft Graph against a dedicated M365 sandbox.
-- **Lint/format**: `ruff` (replacing flake8 + black + isort), `mypy` strict.
-- **Build**: `uv` for lock + sync + build. Hatchling backend.
-- **Auth scopes (delegated)**: `Tasks.Read` (always), `Tasks.ReadWrite` (only when `TASKS_ALLOW_WRITES=true`), `Group.Read.All` (Planner — admin-consent; dropped when `MS_TASKS_NO_PLANNER=true`), `User.Read`, `offline_access`.
-- **Env flags**: `TASKS_ALLOW_WRITES=true` (registers write tools + adds `Tasks.ReadWrite` scope); `MS_TASKS_NO_PLANNER=true` (skips Planner tool registration + drops `Group.Read.All` scope, for non-admin tenants); `TASKS_PROFILE=<name>` (per-tenant cache namespace; default `default`); `TASKS_CLIENT_ID` / `TASKS_TENANT_ID` (BYO Entra app override); `MS_TASKS_TOKEN_STORE=keyring|file|encrypted-file` (override token-store auto-pick); `MS_TASKS_TOKEN_PASSPHRASE` (required for encrypted-file backend).
-
-### Project-specific overrides of the engineering baseline
-
-- **PR workflow already triggered (per § 13).** From the moment `mcp-server-microsoft-tasks` is on PyPI, treat `main` as deployable trunk: feature branches + PRs, branch protection on `main`, CI green required for merge. Until the first published release, direct commits to `main` are acceptable for chores and docs (and have been used during the bootstrap).
-- **Test environment (per § 5).** A dedicated M365 group + Planner plan + To Do test list in the XMV tenant — see `docs/app-concept.md` § Testability. Credentials live in GitHub Actions secrets for CI (`MS_TASKS_HARNESS_TOKEN_JSON`) and in a developer-local profile (`harness`) for iterative work.
-- **Harness token renewal.** Monthly recurring chore: Microsoft refresh tokens rotate every ~60–90 days, so the `MS_TASKS_HARNESS_TOKEN_JSON` repo secret has to be refreshed before CI's harness job starts failing. Same shape as `sharepoint-mcp`'s `scripts/renew-harness-token.sh`.
-- **Non-blocking login from day one (per § 5 and the outlook v0.3.0 incident).** `tasks_login_begin` MUST return immediately with `status="pending"` plus `user_code` + `verification_url`; never block on the polling task. The agent polls `tasks_login_status` for state changes. Blocking deadlocks the UX on clients that don't render progress notifications.
-
-### License header for new source files
-
-This project is dual-licensed **MIT OR Apache-2.0**, copyright **XMV Solutions GmbH**. Generic SPDX rules in [`ENGINEERING_PRINCIPLES.md` § 11](ENGINEERING_PRINCIPLES.md); concrete examples for this project below.
-
-For Python, Shell, YAML, TOML, and most languages with `#` line comments:
-
-```text
-# SPDX-License-Identifier: MIT OR Apache-2.0
-# SPDX-FileCopyrightText: <year> XMV Solutions GmbH
-# SPDX-FileContributor: <git user.name> <<git user.email>>
-```
-
-For languages with `//` line comments (Go, Rust, JS/TS, Java, …):
-
-```text
-// SPDX-License-Identifier: MIT OR Apache-2.0
-// SPDX-FileCopyrightText: <year> XMV Solutions GmbH
-// SPDX-FileContributor: <git user.name> <<git user.email>>
-```
-
-For HTML / Markdown:
-
-```html
-<!--
-SPDX-License-Identifier: MIT OR Apache-2.0
-SPDX-FileCopyrightText: <year> XMV Solutions GmbH
-SPDX-FileContributor: <name> <<email>>
--->
-```
-
-The first `SPDX-FileContributor` line is set when the file is created and is **never overwritten** — this honours the German *Urheberrecht*. New substantial contributors append additional lines. The agent populates the line from the current `git config user.name` / `user.email`.
+Anything that applies to **humans too** lives in `ENGINEERING_PRINCIPLES.md` or `PROJECT_MANAGEMENT_PRINCIPLES.md`, not here. This file is for the failure modes and operational rules that are specific to AI agents.
 
 ---
 
-## How to behave as an AI agent in this repo
+## How to behave as an AI agent in any repo
 
-These rules are AI-specific. Anything that applies to humans too lives in `ENGINEERING_PRINCIPLES.md` — read that first, then apply the additions below.
+### Communication with the operator: be brief
+
+`PROJECT_MANAGEMENT_PRINCIPLES.md` § 11 covers this in full and applies to every interaction. Short version: keep questions one or two sentences, state options + recommendation, do not pre-emptively explain the reasoning. The operator asks "why?" if they want the long version.
 
 ### Stop and ask before external actions
 
-External actions are anything visible outside this working copy. Before any of these, **stop and confirm with the user** unless the user has explicitly authorised the action in the current task:
+External actions are anything visible outside this working copy. Before any of these, **stop and confirm with the operator** unless the operator has explicitly authorised the action in the current task:
 
 - `git push`, `git push --force`, deleting a remote branch.
-- `gh pr create`, `gh pr merge`, closing or reopening issues, posting issue/PR comments.
+- `gh pr create`, `gh pr merge`, closing or reopening issues, posting issue or PR comments.
 - `git tag -a` followed by `git push origin <tag>`, anything that triggers a release pipeline.
 - `gh secret set`, secret rotation, anything touching repository or organisation settings.
 - `gh release create`, package publishing.
 - Any external API call that mutates remote state (cloud APIs, SaaS APIs, Slack, email, …).
 
-A user authorising one external action authorises that action's stated scope only — not the next external action.
-
-### Initialisation gate
-
-If `docs/app-concept.md` is missing **or** the repo's GitHub Project board has not been set up yet, **stop and prompt the user**. Do not begin implementation. Per [`ENGINEERING_PRINCIPLES.md` § 5](ENGINEERING_PRINCIPLES.md) the harness layer must also be green before feature tickets enter "Doing" — verify this gate too on the first feature ticket.
+The operator authorising one external action authorises that action's stated scope only — not the next external action.
 
 ### Self-verification before claiming done
 
 After every code change, run the test harness. After every push, watch CI to completion (`gh run watch <id> --exit-status`) and react if it goes red. Never claim a task complete without:
 
-- Tests pass locally (unit + integration; harness if relevant).
+- Tests pass locally (unit + integration; harness if relevant — see `ENGINEERING_PRINCIPLES.md` § 5).
 - CI on the pushed commit is green.
 - Tracking issue is closed via the PR (or status moved on the Project board).
-- Docs reflect what shipped (per [`ENGINEERING_PRINCIPLES.md` § 15](ENGINEERING_PRINCIPLES.md)).
+- Docs reflect what shipped — `README.md`, `CHANGELOG.md`, app concept, secrets, architecture, whichever apply (`ENGINEERING_PRINCIPLES.md` § 15).
 - No new `(TBD)` markers without a follow-up issue filed.
+
+### Large multi-PR work: orchestrator mode
+
+For investigations, repetitive triage, and self-contained chores, delegate to a sub-agent when the work would meaningfully distract from a primary goal — see the sub-agent delegation guidance below.
+
+For larger work — multi-PR implementations, multi-repo migrations, projects with their own concept ticket — switch into orchestrator mode and follow `PROJECT_MANAGEMENT_PRINCIPLES.md` § 2–9 in full. Note especially **§ 4: plan the parallelisation roadmap *before* spawning any contributor** — breadth-first planning precedes depth-first execution. Then hold the concept ticket as single source of truth, spawn sub-agents on their own feature branches (one branch per contributor), never let sub-agents merge themselves, serialise merges yourself, relay operator escalations.
+
+**Always ask the operator before activating orchestrator mode** (PMP § 3) — even when the heuristics clearly trigger.
+
+### Delegate parallelisable work to sub-agents
+
+When a task is logically self-contained, can run in parallel with your current main thread, and would meaningfully distract you from a primary goal if done inline, spawn a sub-agent for it. Brief the sub-agent with the three named parts from `PROJECT_MANAGEMENT_PRINCIPLES.md` § 5.3 (Mission, Constraints, Output specification) — nothing else load-bearing. Constraints must always include the four visibility rules from § 5.7 (wall-clock budget, early-PR rule, 3-iteration rule, mandatory Output fields) — without those the sub-agent can disappear into a silent rabbit hole. The orchestrator also caps in-flight parallel contributors per § 5.6 (typical: 5).
+
+Concrete examples of what to delegate: investigations, multi-step diagnostics, repetitive triage of similar items, multi-hour bring-ups, code-base sweeps.
+
+What not to delegate: single-step actions, tasks the operator explicitly handed to you personally, decisions that need operator input (those stay in the main thread so the operator sees them).
+
+### Cross-project work
+
+If a task touches two repos under the same workspace, read both repos' `PROJECT_SPECIFICS.md` (where present) and any project-specific docs they reference, then decide which repo the deliverable belongs in. Stay on one repo at a time; do not edit cross-repo from a parent directory if it can be avoided.
+
+### Initialisation gate
+
+If `docs/app-concept.md` (or the project's equivalent product/architecture document) is missing, **stop and prompt the operator**. Do not begin implementation. Per `ENGINEERING_PRINCIPLES.md` § 5 the harness layer must also be green before feature tickets enter "Doing" — verify this gate too on the first feature ticket of a project.
 
 ### When you edit Markdown
 
-Read [`docs/markdown-style.md`](docs/markdown-style.md) **first**. Strict markdownlint rules apply and the CI lint job will reject violations. The Markdown style rules live in a separate file precisely so they don't load as context when you're working on code that doesn't touch Markdown.
+If a project-specific Markdown style guide exists (typically `docs/markdown-style.md`, referenced from `PROJECT_SPECIFICS.md`), read it before editing Markdown in this repo. The style rules live in a separate file precisely so they do not load as context when you are working on code that does not touch Markdown.
 
-### Documentation scaling threshold
-
-If `docs/app-concept.md` plus the relevant supporting docs exceed roughly **50k tokens (~200 KB combined)**, split into a two-level structure:
-
-1. Keep `docs/app-concept.md` as an index — vision, summary, table of contents with links.
-2. Move thematic deep-dives into `docs/app-concept/*.md` chapters (e.g. `architecture.md`, `security.md`, `api-design.md`).
-
-Rationale: AI agents should use ≤1/3 of their context window for project instructions, leaving room for code and conversation.
-
-### Iteration protocol
-
-When implementing a feature:
+### Iteration protocol (default)
 
 ```text
-1. User describes feature requirement.
-2. AI files a GitHub Issue capturing the work
+1. Operator describes feature requirement.
+2. Agent files a GitHub Issue capturing the work
    (## Context / ## Acceptance criteria / ## Out of scope / ## Links).
-3. AI writes failing tests in the test harness (TDD).
-4. AI runs tests (expected: FAIL).
-5. AI implements minimal code.
-6. AI runs tests (expected: PASS).
-7. AI refactors while keeping tests green.
-8. AI opens a PR that closes the issue ("Closes #N" in the PR body).
-9. AI watches CI to completion; reverts or fixes if red.
+3. Agent writes failing tests in the test harness (TDD).
+4. Agent runs tests (expected: FAIL).
+5. Agent implements minimal code.
+6. Agent runs tests (expected: PASS).
+7. Agent refactors while keeping tests green.
+8. Agent opens a PR that closes the issue ("Closes #N" in the PR body).
+9. Agent watches CI to completion; reverts or fixes if red.
 ```
 
-For non-trivial changes, log the design decision under [`docs/proposals/`](docs/proposals/) before writing code (see that folder's README for the lifecycle).
+For non-trivial changes, log the design decision under `docs/proposals/` before writing code (see that folder's README for the lifecycle).
 
 ### Pre-completion checklist
 
@@ -173,7 +105,7 @@ Before declaring work done, verify each item:
 - [ ] Tests pass locally (unit + integration; harness if relevant).
 - [ ] CI on the pushed commit is green.
 - [ ] Tracking issue is closed via the PR (or status moved on the Project board).
-- [ ] Docs reflect what shipped — README, CHANGELOG, app-concept, secrets, architecture, whichever apply.
-- [ ] Commit messages follow Conventional Commits (`feat(scope): subject`, etc.; see [`ENGINEERING_PRINCIPLES.md` § 6](ENGINEERING_PRINCIPLES.md)).
-- [ ] No `Co-Authored-By: <AI tool>` lines, no AI tool names in source comments or SPDX headers (see [`ENGINEERING_PRINCIPLES.md` § 12](ENGINEERING_PRINCIPLES.md)).
+- [ ] Docs reflect what shipped — README, CHANGELOG, app concept, secrets, architecture, whichever apply.
+- [ ] Commit messages follow Conventional Commits (`feat(scope): subject`, etc.; see `ENGINEERING_PRINCIPLES.md` § 6).
+- [ ] No `Co-Authored-By: <AI tool>` lines, no AI tool names in source comments or SPDX headers (see `ENGINEERING_PRINCIPLES.md` § 12).
 - [ ] No new `(TBD)` markers without a follow-up issue filed.
